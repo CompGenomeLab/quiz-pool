@@ -10,7 +10,12 @@ const state = {
   validationErrors: [],
 };
 
+const CHOICE_KEYS = ["A", "B", "C", "D", "E"];
+const MIN_CHOICE_COUNT = 2;
+const MAX_CHOICE_COUNT = CHOICE_KEYS.length;
+
 const elements = {
+  addChoice: document.querySelector("#add-choice"),
   addQuestion: document.querySelector("#add-question"),
   addLocation: document.querySelector("#add-location"),
   bookLocations: document.querySelector("#book-locations"),
@@ -36,6 +41,7 @@ const elements = {
   quizTitle: document.querySelector("#quiz-title"),
   reloadQuiz: document.querySelector("#reload-quiz"),
   reloadNotice: document.querySelector("#reload-notice"),
+  removeChoice: document.querySelector("#remove-choice"),
   saveQuiz: document.querySelector("#save-quiz"),
   saveStatus: document.querySelector("#save-status"),
 };
@@ -92,8 +98,28 @@ function renderReloadNotice() {
   elements.reloadNotice.classList.toggle("hidden", !(state.showReloadNotice && state.isDirty));
 }
 
+function normalizeChoices(rawChoices) {
+  const choiceMap = new Map(
+    (Array.isArray(rawChoices) ? rawChoices : [])
+      .filter((choice) => choice && CHOICE_KEYS.includes(choice.key))
+      .map((choice) => [choice.key, choice.text ?? ""]),
+  );
+  const highestIndex = CHOICE_KEYS.reduce((index, key, currentIndex) => (
+    choiceMap.has(key) ? currentIndex : index
+  ), MIN_CHOICE_COUNT - 1);
+  const count = Math.max(MIN_CHOICE_COUNT, Math.min(MAX_CHOICE_COUNT, highestIndex + 1));
+  return CHOICE_KEYS.slice(0, count).map((key) => ({ key, text: choiceMap.get(key) ?? "" }));
+}
+
+function normalizeCorrectAnswers(rawAnswers, activeChoices) {
+  const activeKeys = new Set(activeChoices.map((choice) => choice.key));
+  return CHOICE_KEYS.filter((key) => (
+    activeKeys.has(key) && Array.isArray(rawAnswers) && rawAnswers.includes(key)
+  ));
+}
+
 function normalizeQuestionDraft(question = {}) {
-  const choiceMap = new Map((question.choices ?? []).map((choice) => [choice.key, choice.text ?? ""]));
+  const choices = normalizeChoices(question.choices);
   const rawLocations = Array.isArray(question.bookLocations) && question.bookLocations.length > 0
     ? question.bookLocations
     : [defaultBookLocation()];
@@ -101,10 +127,10 @@ function normalizeQuestionDraft(question = {}) {
   return {
     id: question.id ?? nextQuestionId(),
     question: question.question ?? "",
-    choices: ["A", "B", "C", "D"].map((key) => ({ key, text: choiceMap.get(key) ?? "" })),
+    choices,
     shuffleChoices: Boolean(question.shuffleChoices),
     learningObjectiveIds: Array.isArray(question.learningObjectiveIds) ? [...question.learningObjectiveIds] : [],
-    correctAnswers: Array.isArray(question.correctAnswers) ? [...question.correctAnswers] : [],
+    correctAnswers: normalizeCorrectAnswers(question.correctAnswers, choices),
     bookLocations: rawLocations.map((location) => ({
       chapter: location.chapter ?? "",
       section: location.section ?? "",
@@ -278,6 +304,13 @@ function renderChoices(question) {
   elements.choicesEditor.replaceChildren(fragment);
 }
 
+function renderChoiceActions(question) {
+  const choiceCount = question?.choices?.length ?? 0;
+  const hasQuestion = Boolean(question);
+  elements.addChoice.disabled = !hasQuestion || choiceCount >= MAX_CHOICE_COUNT;
+  elements.removeChoice.disabled = !hasQuestion || choiceCount <= MIN_CHOICE_COUNT;
+}
+
 function renderBookLocations(question) {
   const fragment = document.createDocumentFragment();
   question.bookLocations.forEach((location, index) => {
@@ -325,6 +358,7 @@ function renderQuestionEditor() {
 
   if (!hasQuestion) {
     elements.questionHeading.textContent = "Select a question";
+    renderChoiceActions(null);
     renderQuestionObjectiveLinks();
     elements.choicesEditor.replaceChildren();
     elements.bookLocations.replaceChildren();
@@ -339,6 +373,7 @@ function renderQuestionEditor() {
   elements.questionText.value = draft.question;
   elements.questionExplanation.value = draft.explanation;
 
+  renderChoiceActions(draft);
   renderChoices(draft);
   renderQuestionObjectiveLinks();
   renderBookLocations(draft);
@@ -491,6 +526,7 @@ function wireGlobalFields() {
     const newQuestion = normalizeQuestionDraft({
       id: nextQuestionId(),
       learningObjectiveIds: state.quiz.learningObjectives.slice(0, 1).map((objective) => objective.id),
+      choices: CHOICE_KEYS.slice(0, MIN_CHOICE_COUNT).map((key) => ({ key, text: "" })),
       correctAnswers: ["A"],
       bookLocations: [defaultBookLocation()],
     });
@@ -518,6 +554,35 @@ function wireGlobalFields() {
     recordQuizMutation();
     render();
     setStatus("Question removed. Save to persist the deletion.");
+  });
+
+  elements.addChoice.addEventListener("click", () => {
+    updateSelectedQuestion((draft) => {
+      if (draft.choices.length >= MAX_CHOICE_COUNT) {
+        return draft;
+      }
+      draft.choices.push({
+        key: CHOICE_KEYS[draft.choices.length],
+        text: "",
+      });
+      return draft;
+    });
+    render();
+  });
+
+  elements.removeChoice.addEventListener("click", () => {
+    updateSelectedQuestion((draft) => {
+      if (draft.choices.length <= MIN_CHOICE_COUNT) {
+        return draft;
+      }
+      const removedChoice = draft.choices.pop();
+      draft.correctAnswers = draft.correctAnswers.filter((answer) => answer !== removedChoice.key);
+      if (draft.correctAnswers.length === 0) {
+        draft.correctAnswers = [draft.choices[0].key];
+      }
+      return draft;
+    });
+    render();
   });
 
   elements.addLocation.addEventListener("click", () => {

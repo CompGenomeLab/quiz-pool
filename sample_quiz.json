@@ -1,6 +1,6 @@
 {
   "title": "Random General Knowledge Mini Quiz",
-  "description": "A simple two-question quiz pool generated to match scheme.json.",
+  "description": "A sample general-knowledge quiz pool with multiple dummy questions generated to match scheme.json.",
   "learningObjectives": [
     {
       "id": "LO1",
@@ -97,6 +97,356 @@
       ],
       "difficulty": 1,
       "explanation": "Jupiter is the largest planet in the solar system."
+    },
+    {
+      "id": "Q3",
+      "question": "Which ocean is the largest on Earth?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Atlantic Ocean"
+        },
+        {
+          "key": "B",
+          "text": "Indian Ocean"
+        },
+        {
+          "key": "C",
+          "text": "Pacific Ocean"
+        },
+        {
+          "key": "D",
+          "text": "Arctic Ocean"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO1", "LO3"],
+      "correctAnswers": ["C"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Oceans and Continents",
+          "page": "8-9",
+          "reference": "Map comparing the major oceans."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "The Pacific Ocean is the largest ocean on Earth."
+    },
+    {
+      "id": "Q4",
+      "question": "What gas do plants primarily absorb from the atmosphere during photosynthesis?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Oxygen"
+        },
+        {
+          "key": "B",
+          "text": "Carbon dioxide"
+        },
+        {
+          "key": "C",
+          "text": "Nitrogen"
+        },
+        {
+          "key": "D",
+          "text": "Hydrogen"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO3", "LO4", "LO6"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 3",
+          "section": "Plants and Energy",
+          "page": 21,
+          "reference": "Introductory explanation of photosynthesis."
+        }
+      ],
+      "difficulty": 2,
+      "explanation": "Plants use carbon dioxide, water, and sunlight to make food during photosynthesis."
+    },
+    {
+      "id": "Q5",
+      "question": "Which country is home to the city of Cairo?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Morocco"
+        },
+        {
+          "key": "B",
+          "text": "Egypt"
+        },
+        {
+          "key": "C",
+          "text": "Jordan"
+        },
+        {
+          "key": "D",
+          "text": "Tunisia"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO1", "LO4"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Major World Cities",
+          "page": "10-11",
+          "reference": "Capital cities in Africa and the Middle East."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "Cairo is the capital city of Egypt."
+    },
+    {
+      "id": "Q6",
+      "question": "How many sides does a hexagon have?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Five"
+        },
+        {
+          "key": "B",
+          "text": "Six"
+        },
+        {
+          "key": "C",
+          "text": "Seven"
+        },
+        {
+          "key": "D",
+          "text": "Eight"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO3", "LO4", "LO6"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 4",
+          "section": "Basic Shapes",
+          "page": 33,
+          "reference": "Polygon names by number of sides."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "A hexagon is a polygon with six sides."
+    },
+    {
+      "id": "Q7",
+      "question": "Which instrument is commonly used to measure temperature?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Barometer"
+        },
+        {
+          "key": "B",
+          "text": "Thermometer"
+        },
+        {
+          "key": "C",
+          "text": "Compass"
+        },
+        {
+          "key": "D",
+          "text": "Ruler"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO3", "LO4", "LO5"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 5",
+          "section": "Scientific Tools",
+          "page": "41-42",
+          "reference": "Common classroom measurement instruments."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "A thermometer is used to measure temperature."
+    },
+    {
+      "id": "Q8",
+      "question": "Which continent is Brazil located on?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Europe"
+        },
+        {
+          "key": "B",
+          "text": "Africa"
+        },
+        {
+          "key": "C",
+          "text": "South America"
+        },
+        {
+          "key": "D",
+          "text": "Asia"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO1", "LO3", "LO4"],
+      "correctAnswers": ["C"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Countries and Continents",
+          "page": 14,
+          "reference": "Regional map of the Americas."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "Brazil is the largest country in South America."
+    },
+    {
+      "id": "Q9",
+      "question": "What is the chemical symbol for water?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "O2"
+        },
+        {
+          "key": "B",
+          "text": "CO2"
+        },
+        {
+          "key": "C",
+          "text": "H2O"
+        },
+        {
+          "key": "D",
+          "text": "NaCl"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO3", "LO4", "LO6"],
+      "correctAnswers": ["C"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 6",
+          "section": "Matter and Molecules",
+          "page": 49,
+          "reference": "Examples of simple chemical formulas."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "Water is represented by the chemical formula H2O."
+    },
+    {
+      "id": "Q10",
+      "question": "Which language is primarily spoken in Brazil?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Spanish"
+        },
+        {
+          "key": "B",
+          "text": "Portuguese"
+        },
+        {
+          "key": "C",
+          "text": "French"
+        },
+        {
+          "key": "D",
+          "text": "Italian"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO1", "LO3", "LO4"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 7",
+          "section": "Languages of the World",
+          "page": "55-56",
+          "reference": "Language distribution in South America."
+        }
+      ],
+      "difficulty": 2,
+      "explanation": "Portuguese is the official and most widely spoken language in Brazil."
+    },
+    {
+      "id": "Q11",
+      "question": "Which planet is known for its prominent ring system?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Mercury"
+        },
+        {
+          "key": "B",
+          "text": "Saturn"
+        },
+        {
+          "key": "C",
+          "text": "Mars"
+        },
+        {
+          "key": "D",
+          "text": "Neptune"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO2", "LO3", "LO6"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Planets",
+          "page": 16,
+          "reference": "Illustration of the solar system with planet features."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "Saturn is especially known for its visible ring system."
+    },
+    {
+      "id": "Q12",
+      "question": "What is 9 multiplied by 7?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "56"
+        },
+        {
+          "key": "B",
+          "text": "63"
+        },
+        {
+          "key": "C",
+          "text": "72"
+        },
+        {
+          "key": "D",
+          "text": "79"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO3", "LO4", "LO6"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 4",
+          "section": "Multiplication Review",
+          "page": 36,
+          "reference": "Single-digit multiplication facts table."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "Nine times seven equals sixty-three."
     }
   ]
 }

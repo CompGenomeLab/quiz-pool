@@ -70,48 +70,24 @@
         },
         "choices": {
           "type": "array",
-          "description": "Exactly 4 answer choices labeled A-D",
-          "minItems": 4,
-          "maxItems": 4,
-          "items": {
-            "$ref": "#/$defs/choice"
-          },
-          "allOf": [
+          "description": "Contiguous answer choices labeled from A up to at most E",
+          "minItems": 2,
+          "maxItems": 5,
+          "prefixItems": [
             {
-              "contains": {
-                "type": "object",
-                "properties": {
-                  "key": { "const": "A" }
-                },
-                "required": ["key"]
-              }
+              "$ref": "#/$defs/choiceA"
             },
             {
-              "contains": {
-                "type": "object",
-                "properties": {
-                  "key": { "const": "B" }
-                },
-                "required": ["key"]
-              }
+              "$ref": "#/$defs/choiceB"
             },
             {
-              "contains": {
-                "type": "object",
-                "properties": {
-                  "key": { "const": "C" }
-                },
-                "required": ["key"]
-              }
+              "$ref": "#/$defs/choiceC"
             },
             {
-              "contains": {
-                "type": "object",
-                "properties": {
-                  "key": { "const": "D" }
-                },
-                "required": ["key"]
-              }
+              "$ref": "#/$defs/choiceD"
+            },
+            {
+              "$ref": "#/$defs/choiceE"
             }
           ]
         },
@@ -136,7 +112,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "enum": ["A", "B", "C", "D"]
+            "enum": ["A", "B", "C", "D", "E"]
           }
         },
         "bookLocations": {
@@ -157,7 +133,89 @@
           "type": "string",
           "description": "Optional explanation for the correct answer(s)"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "choices": {
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "correctAnswers": {
+                "items": {
+                  "type": "string",
+                  "enum": ["A", "B"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "choices": {
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "correctAnswers": {
+                "items": {
+                  "type": "string",
+                  "enum": ["A", "B", "C"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "choices": {
+                "minItems": 4,
+                "maxItems": 4
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "correctAnswers": {
+                "items": {
+                  "type": "string",
+                  "enum": ["A", "B", "C", "D"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "choices": {
+                "minItems": 5,
+                "maxItems": 5
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "correctAnswers": {
+                "items": {
+                  "type": "string",
+                  "enum": ["A", "B", "C", "D", "E"]
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "choice": {
       "type": "object",
@@ -166,12 +224,82 @@
       "properties": {
         "key": {
           "type": "string",
-          "enum": ["A", "B", "C", "D"]
+          "enum": ["A", "B", "C", "D", "E"]
         },
         "text": {
           "type": "string"
         }
       }
+    },
+    "choiceA": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/choice"
+        },
+        {
+          "properties": {
+            "key": {
+              "const": "A"
+            }
+          }
+        }
+      ]
+    },
+    "choiceB": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/choice"
+        },
+        {
+          "properties": {
+            "key": {
+              "const": "B"
+            }
+          }
+        }
+      ]
+    },
+    "choiceC": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/choice"
+        },
+        {
+          "properties": {
+            "key": {
+              "const": "C"
+            }
+          }
+        }
+      ]
+    },
+    "choiceD": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/choice"
+        },
+        {
+          "properties": {
+            "key": {
+              "const": "D"
+            }
+          }
+        }
+      ]
+    },
+    "choiceE": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/choice"
+        },
+        {
+          "properties": {
+            "key": {
+              "const": "E"
+            }
+          }
+        }
+      ]
     },
     "bookLocation": {
       "type": "object",

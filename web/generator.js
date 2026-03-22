@@ -16,6 +16,14 @@ const state = {
   },
 };
 
+const DEFAULT_EXAM_RULES = [
+  "Complete the student information block before the exam begins.",
+  "Read every question carefully and select all correct answers for each question.",
+  "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
+  "Do not communicate with other students or use unauthorized materials during the exam.",
+  "Remain seated until instructed to stop and submit your paper.",
+];
+
 const elements = {
   availableCount: document.querySelector("#available-count"),
   chapterFilters: document.querySelector("#chapter-filters"),
@@ -24,6 +32,7 @@ const elements = {
   difficultyFilters: document.querySelector("#difficulty-filters"),
   examDate: document.querySelector("#exam-date"),
   examName: document.querySelector("#exam-name"),
+  examRules: document.querySelector("#exam-rules"),
   examStorePath: document.querySelector("#exam-store-path"),
   errorList: document.querySelector("#generator-error-list"),
   errorPanel: document.querySelector("#generator-errors"),
@@ -33,6 +42,7 @@ const elements = {
   generateExams: document.querySelector("#generate-exams"),
   generatorStatus: document.querySelector("#generator-status"),
   includedCount: document.querySelector("#included-count"),
+  institutionName: document.querySelector("#institution-name"),
   objectiveFilters: document.querySelector("#objective-filters"),
   poolTableBody: document.querySelector("#pool-table-body"),
   printResults: document.querySelector("#print-results"),
@@ -47,16 +57,24 @@ const elements = {
   resultSelectedCount: document.querySelector("#result-selected-count"),
   resultVariantCount: document.querySelector("#result-variant-count"),
   results: document.querySelector("#generation-results"),
+  startTime: document.querySelector("#start-time"),
   teacherSummaryBody: document.querySelector("#teacher-summary-body"),
+  totalTimeMinutes: document.querySelector("#total-time-minutes"),
   variantCount: document.querySelector("#variant-count"),
   variantPreviews: document.querySelector("#variant-previews"),
 };
 
 function printableMetadata() {
+  const totalTimeRaw = elements.totalTimeMinutes.value.trim();
+  const parsedTotalTime = totalTimeRaw === "" ? null : Number.parseInt(totalTimeRaw, 10);
   return {
+    institutionName: elements.institutionName.value.trim(),
     examName: elements.examName.value.trim(),
     courseName: elements.courseName.value.trim(),
     examDate: elements.examDate.value.trim(),
+    startTime: elements.startTime.value.trim(),
+    totalTimeMinutes: Number.isFinite(parsedTotalTime) ? parsedTotalTime : null,
+    examRules: parseExamRules(elements.examRules.value),
   };
 }
 
@@ -67,10 +85,19 @@ function normalizeTextValue(value, fallback = "") {
 function runPrintSettings(run) {
   const settings = run?.printSettings ?? {};
   return {
+    institutionName: normalizeTextValue(settings.institutionName, "Institution Name"),
     examName: normalizeTextValue(settings.examName, run?.quiz?.title || "Generated Exam"),
     courseName: normalizeTextValue(settings.courseName, "—"),
     examDate: normalizeTextValue(settings.examDate, "—"),
+    startTime: normalizeTextValue(settings.startTime, "—"),
+    totalTimeMinutes: String(settings.totalTimeMinutes ?? "").trim() || "—",
+    examRules: normalizeExamRules(settings.examRules),
   };
+}
+
+function variantPageCount(variant) {
+  const totalPages = variant?.printLayout?.totalPages;
+  return Number.isInteger(totalPages) && totalPages > 0 ? totalPages : 1;
 }
 
 function setStatus(message, isError = false) {
@@ -89,6 +116,38 @@ function truncate(text, maxLength = 120) {
     return text;
   }
   return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function parseExamRules(value) {
+  return value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeExamRules(value) {
+  if (Array.isArray(value)) {
+    const rules = value.map((rule) => normalizeTextValue(rule)).filter(Boolean);
+    if (rules.length > 0) {
+      return rules;
+    }
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const rules = parseExamRules(value);
+    if (rules.length > 0) {
+      return rules;
+    }
+  }
+  return [...DEFAULT_EXAM_RULES];
 }
 
 function questionChapters(question) {
@@ -411,15 +470,11 @@ function renderGeneratedRun() {
     const meta = document.createElement("p");
     meta.className = "variant-card__meta";
     const metaParts = [];
-    if (printSettings.courseName !== "—") {
-      metaParts.push(printSettings.courseName);
-    }
-    if (printSettings.examDate !== "—") {
-      metaParts.push(printSettings.examDate);
-    }
-    if (run.quiz.description) {
-      metaParts.push(run.quiz.description);
-    }
+    metaParts.push(printSettings.institutionName);
+    if (printSettings.courseName !== "—") metaParts.push(printSettings.courseName);
+    if (printSettings.examDate !== "—") metaParts.push(printSettings.examDate);
+    if (printSettings.startTime !== "—") metaParts.push(printSettings.startTime);
+    if (printSettings.totalTimeMinutes !== "—") metaParts.push(`${printSettings.totalTimeMinutes} min`);
     meta.textContent = metaParts.join(" · ") || "Generated from the current quiz pool.";
     headingBlock.append(eyebrow, title, meta);
 
@@ -431,18 +486,52 @@ function renderGeneratedRun() {
     qrImage.alt = "Variant tracking QR code";
     qrImage.loading = "lazy";
     qrImage.src = `/api/exams/variant-qr/${encodeURIComponent(variant.variantId)}.svg`;
-
-    const qrLabel = document.createElement("p");
-    qrLabel.className = "variant-card__qr-label";
-    qrLabel.textContent = "Variant QR";
-
-    const qrCopy = document.createElement("p");
-    qrCopy.className = "variant-card__qr-copy";
-    qrCopy.textContent = "Repeated on every printed page for grading lookup.";
-
-    qr.append(qrImage, qrLabel, qrCopy);
+    qr.append(qrImage);
 
     header.append(headingBlock, qr);
+
+    const cover = document.createElement("section");
+    cover.className = "variant-card__cover";
+
+    const studentInfo = document.createElement("div");
+    studentInfo.className = "variant-card__block";
+    studentInfo.innerHTML = `
+      <h4>Student Information</h4>
+      <div class="variant-card__line-grid">
+        <div class="variant-card__line-field variant-card__line-field--wide"><span>Student Name</span><i></i></div>
+        <div class="variant-card__line-field"><span>Student ID</span><i></i></div>
+        <div class="variant-card__line-field"><span>Class / Section</span><i></i></div>
+        <div class="variant-card__line-field variant-card__line-field--wide"><span>Signature</span><i></i></div>
+      </div>
+    `;
+
+    const examInfo = document.createElement("div");
+    examInfo.className = "variant-card__block";
+    examInfo.innerHTML = `
+      <h4>Exam Information</h4>
+      <div class="variant-card__fact-grid">
+        <div class="variant-card__fact"><span>Exam Name</span><strong>${escapeHtml(printSettings.examName)}</strong></div>
+        <div class="variant-card__fact"><span>Course / Subject</span><strong>${escapeHtml(printSettings.courseName)}</strong></div>
+        <div class="variant-card__fact"><span>Exam Date</span><strong>${escapeHtml(printSettings.examDate)}</strong></div>
+        <div class="variant-card__fact"><span>Start Time</span><strong>${escapeHtml(printSettings.startTime)}</strong></div>
+        <div class="variant-card__fact"><span>Total Time in Minutes</span><strong>${escapeHtml(printSettings.totalTimeMinutes)}</strong></div>
+        <div class="variant-card__fact"><span>Number of Questions</span><strong>${variant.questions.length}</strong></div>
+        <div class="variant-card__fact"><span>Number of Pages</span><strong>${variantPageCount(variant)}</strong></div>
+      </div>
+    `;
+
+    const rules = document.createElement("div");
+    rules.className = "variant-card__block";
+    const rulesMarkup = printSettings.examRules
+      .map((rule) => `<li>${escapeHtml(rule)}</li>`)
+      .join("");
+    rules.innerHTML = `
+      <h4>Exam Rules</h4>
+      <ol class="variant-card__rules">${rulesMarkup}</ol>
+      <p class="variant-card__instruction">Review each question and mark all correct answers. Questions begin on page 2.</p>
+    `;
+
+    cover.append(studentInfo, examInfo, rules);
 
     const questionList = document.createElement("div");
     questionList.className = "question-preview-list";
@@ -453,7 +542,7 @@ function renderGeneratedRun() {
 
       const questionHead = document.createElement("div");
       questionHead.className = "question-preview__head";
-      questionHead.textContent = `Question ${question.position} · ${question.sourceQuestionId} · Difficulty ${question.difficulty}`;
+      questionHead.textContent = `Question ${question.position}`;
 
       const title = document.createElement("p");
       title.className = "question-preview__title";
@@ -474,7 +563,7 @@ function renderGeneratedRun() {
       questionList.append(section);
     }
 
-    card.append(header, questionList);
+    card.append(header, cover, questionList);
     variantFragment.append(card);
   }
   elements.variantPreviews.replaceChildren(variantFragment);
@@ -494,6 +583,9 @@ async function loadQuiz() {
   state.selection.variantCount = 1;
   if (!elements.examName.value.trim()) {
     elements.examName.value = state.quiz.title ?? "";
+  }
+  if (!elements.examRules.value.trim()) {
+    elements.examRules.value = DEFAULT_EXAM_RULES.join("\n");
   }
   elements.dbPath.textContent = state.dbPath;
   elements.examStorePath.textContent = state.examStorePath;

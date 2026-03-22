@@ -27,9 +27,17 @@ WEB_ROOT = ROOT / "web"
 DEFAULT_DB = ROOT / "sample_quiz.json"
 DEFAULT_SCHEMA = ROOT / "scheme.json"
 DEFAULT_EXAM_STORE_NAME = "generated_exams.json"
-DISPLAY_KEYS = ("A", "B", "C", "D")
+DISPLAY_KEYS = ("A", "B", "C", "D", "E")
 DEFAULT_PRINTABLE_FOLDER = "exam-printables"
 QUESTION_POOL_PRINTABLE_NAME = "question-pool.html"
+QUESTION_PAGE_CAPACITY = 38
+DEFAULT_EXAM_RULES = [
+    "Complete the student information block before the exam begins.",
+    "Read every question carefully and select all correct answers for each question.",
+    "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
+    "Do not communicate with other students or use unauthorized materials during the exam.",
+    "Remain seated until instructed to stop and submit your paper.",
+]
 
 
 @dataclass
@@ -213,6 +221,47 @@ def normalize_optional_string(
     return value.strip()
 
 
+def normalize_optional_positive_int(
+    payload: dict[str, Any], key: str, errors: list[dict[str, str]]
+) -> int | None:
+    value = payload.get(key)
+    if value in (None, ""):
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        errors.append({"path": key, "message": f"{key} must be a positive integer"})
+        return None
+    return value
+
+
+def normalize_rule_list(
+    payload: dict[str, Any], key: str, errors: list[dict[str, str]]
+) -> list[str]:
+    value = payload.get(key, [])
+    if value in (None, ""):
+        return []
+
+    if isinstance(value, str):
+        items = [line.strip() for line in value.splitlines() if line.strip()]
+        return dedupe_preserve_order(items)
+
+    if not isinstance(value, list):
+        errors.append({"path": key, "message": f"{key} must be an array of strings or a newline-delimited string"})
+        return []
+
+    items: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            errors.append({"path": f"{key}.{index}", "message": "Must be a string"})
+            continue
+        normalized = item.strip()
+        if not normalized:
+            errors.append({"path": f"{key}.{index}", "message": "Must not be empty"})
+            continue
+        items.append(normalized)
+
+    return dedupe_preserve_order(items)
+
+
 def extract_question_chapters(question: dict[str, Any]) -> list[str]:
     chapters: list[str] = []
     for location in question.get("bookLocations", []):
@@ -257,9 +306,13 @@ def normalize_generation_request(
     learning_objective_ids = normalize_string_list(payload, "learningObjectiveIds", errors)
     include_question_ids = normalize_string_list(payload, "includeQuestionIds", errors)
     exclude_question_ids = normalize_string_list(payload, "excludeQuestionIds", errors)
+    institution_name = normalize_optional_string(payload, "institutionName", errors)
     exam_name = normalize_optional_string(payload, "examName", errors)
     course_name = normalize_optional_string(payload, "courseName", errors)
     exam_date = normalize_optional_string(payload, "examDate", errors)
+    start_time = normalize_optional_string(payload, "startTime", errors)
+    total_time_minutes = normalize_optional_positive_int(payload, "totalTimeMinutes", errors)
+    exam_rules = normalize_rule_list(payload, "examRules", errors)
 
     known_objective_ids = {
         objective["id"]
@@ -304,9 +357,13 @@ def normalize_generation_request(
             "learningObjectiveIds": learning_objective_ids,
             "includeQuestionIds": include_question_ids,
             "excludeQuestionIds": exclude_question_ids,
+            "institutionName": institution_name,
             "examName": exam_name,
             "courseName": course_name,
             "examDate": exam_date,
+            "startTime": start_time,
+            "totalTimeMinutes": total_time_minutes,
+            "examRules": exam_rules,
         },
         [],
     )
@@ -375,27 +432,51 @@ def build_question_pool_entry(
     }
 
 
-def get_print_settings(exam_set: dict[str, Any]) -> dict[str, str]:
+def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
     raw = exam_set.get("printSettings")
     if not isinstance(raw, dict):
         raw = {}
 
+    institution_name = raw.get("institutionName")
     exam_name = raw.get("examName")
     course_name = raw.get("courseName")
     exam_date = raw.get("examDate")
+    start_time = raw.get("startTime")
+    total_time_minutes = raw.get("totalTimeMinutes")
+    exam_rules = raw.get("examRules")
 
+    normalized_institution_name = institution_name.strip() if isinstance(institution_name, str) else ""
     normalized_exam_name = exam_name.strip() if isinstance(exam_name, str) else ""
     normalized_course_name = course_name.strip() if isinstance(course_name, str) else ""
     normalized_exam_date = exam_date.strip() if isinstance(exam_date, str) else ""
+    normalized_start_time = start_time.strip() if isinstance(start_time, str) else ""
+    normalized_total_time = ""
+    if isinstance(total_time_minutes, int) and total_time_minutes > 0:
+        normalized_total_time = str(total_time_minutes)
+    elif isinstance(total_time_minutes, str) and total_time_minutes.strip():
+        normalized_total_time = total_time_minutes.strip()
+    normalized_rules: list[str] = []
+    if isinstance(exam_rules, list):
+        normalized_rules = [
+            rule.strip() for rule in exam_rules if isinstance(rule, str) and rule.strip()
+        ]
+    elif isinstance(exam_rules, str) and exam_rules.strip():
+        normalized_rules = [line.strip() for line in exam_rules.splitlines() if line.strip()]
 
     fallback_title = exam_set.get("quiz", {}).get("title", "")
     if not normalized_exam_name and isinstance(fallback_title, str):
         normalized_exam_name = fallback_title.strip()
+    if not normalized_rules:
+        normalized_rules = list(DEFAULT_EXAM_RULES)
 
     return {
+        "institutionName": normalized_institution_name or "Institution Name",
         "examName": normalized_exam_name,
         "courseName": normalized_course_name,
         "examDate": normalized_exam_date,
+        "startTime": normalized_start_time,
+        "totalTimeMinutes": normalized_total_time,
+        "examRules": normalized_rules,
     }
 
 
@@ -490,7 +571,64 @@ def build_variant_qr_payload(exam_set_id: str, variant_id: str) -> str:
 
 def render_variant_qr_svg(exam_set_id: str, variant_id: str) -> str:
     qr_code = segno.make(build_variant_qr_payload(exam_set_id, variant_id))
-    return qr_code.svg_inline(scale=4, border=1)
+    return qr_code.svg_inline(scale=5, border=2, omitsize=True)
+
+
+def estimate_wrapped_line_count(text: str, chars_per_line: int) -> int:
+    normalized = " ".join(str(text).split())
+    if not normalized:
+        return 1
+    return max(1, math.ceil(len(normalized) / chars_per_line))
+
+
+def estimate_question_print_units(question: dict[str, Any]) -> int:
+    units = 4 + estimate_wrapped_line_count(question.get("question", ""), 92)
+    for choice in question.get("displayChoices", []):
+        units += 1 + estimate_wrapped_line_count(choice.get("text", ""), 84)
+    return units + 1
+
+
+def build_variant_print_layout(variant: dict[str, Any]) -> dict[str, Any]:
+    pages: list[dict[str, Any]] = [{"pageNumber": 1, "kind": "cover", "questionPositions": []}]
+    current_positions: list[int] = []
+    used_units = 0
+
+    for question in variant.get("questions", []):
+        question_units = estimate_question_print_units(question)
+        if current_positions and used_units + question_units > QUESTION_PAGE_CAPACITY:
+            pages.append(
+                {
+                    "pageNumber": len(pages) + 1,
+                    "kind": "questions",
+                    "questionPositions": current_positions,
+                }
+            )
+            current_positions = [question["position"]]
+            used_units = question_units
+            continue
+
+        current_positions.append(question["position"])
+        used_units += question_units
+
+    if current_positions:
+        pages.append(
+            {
+                "pageNumber": len(pages) + 1,
+                "kind": "questions",
+                "questionPositions": current_positions,
+            }
+        )
+
+    return {
+        "questionCount": len(variant.get("questions", [])),
+        "totalPages": len(pages),
+        "pages": pages,
+    }
+
+
+def annotate_variant_print_layouts(variants: list[dict[str, Any]]) -> None:
+    for variant in variants:
+        variant["printLayout"] = build_variant_print_layout(variant)
 
 
 def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
@@ -564,6 +702,7 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
         build_variant(selected_questions, rank, exam_set_id, objective_labels) for rank in ranks
     ]
     annotate_variant_printables(variants)
+    annotate_variant_print_layouts(variants)
 
     return {
         "examSetId": exam_set_id,
@@ -574,9 +713,13 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
             "dbPath": str(state.db_path),
         },
         "printSettings": {
+            "institutionName": request["institutionName"],
             "examName": request["examName"] or quiz.get("title", ""),
             "courseName": request["courseName"],
             "examDate": request["examDate"],
+            "startTime": request["startTime"],
+            "totalTimeMinutes": request["totalTimeMinutes"],
+            "examRules": request["examRules"],
         },
         "printableFolderName": DEFAULT_PRINTABLE_FOLDER,
         "questionPoolFileName": QUESTION_POOL_PRINTABLE_NAME,
@@ -743,48 +886,6 @@ def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
         background: rgba(20, 108, 89, 0.07);
       }}
 
-      .page--student {{
-        padding-right: 172px;
-      }}
-
-      .student-qr {{
-        align-items: center;
-        background: rgba(248, 245, 236, 0.96);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 12px;
-        position: absolute;
-        right: 28px;
-        text-align: center;
-        top: 28px;
-        width: 126px;
-      }}
-
-      .student-qr svg {{
-        display: block;
-        height: auto;
-        width: 100%;
-      }}
-
-      .student-qr__label {{
-        color: #146c59;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        margin: 0;
-        text-transform: uppercase;
-      }}
-
-      .student-qr__copy {{
-        color: var(--muted);
-        font-size: 0.78rem;
-        line-height: 1.35;
-        margin: 0;
-      }}
-
       @media print {{
         body {{
           background: #fff;
@@ -797,20 +898,6 @@ def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
           box-shadow: none;
           max-width: none;
           padding: 0;
-        }}
-
-        .page--student {{
-          padding-right: 42mm;
-        }}
-
-        .student-qr {{
-          background: #fff;
-          border-radius: 12px;
-          padding: 8px;
-          position: fixed;
-          right: 12mm;
-          top: 12mm;
-          width: 30mm;
         }}
       }}
     </style>
@@ -887,51 +974,642 @@ def render_question_pool_html(exam_set: dict[str, Any], question_pool: list[dict
 
 def render_variant_qr_markup(exam_set: dict[str, Any], variant: dict[str, Any]) -> str:
     qr_svg = render_variant_qr_svg(exam_set["examSetId"], variant["variantId"])
+    return f'<div class="sheet-header__qr" aria-label="Variant tracking QR code">{qr_svg}</div>'
+
+
+def render_exam_detail(label: str, value: str, *, escape_value: bool = True) -> str:
+    escaped_label = html.escape(label)
+    escaped_value = html.escape(value) if escape_value else value
+    blank_class = " exam-detail__value--blank" if not value else ""
+    body = escaped_value if value else "&nbsp;"
     return f"""
-<aside class="student-qr" aria-label="Variant tracking QR code">
-  {qr_svg}
-  <p class="student-qr__label">Variant QR</p>
-  <p class="student-qr__copy">Repeated on every printed page for grading lookup.</p>
-</aside>
+<div class="exam-detail">
+  <span class="exam-detail__label">{escaped_label}</span>
+  <span class="exam-detail__value{blank_class}">{body}</span>
+</div>
+"""
+
+
+def render_student_line_field(label: str, *, wide: bool = False) -> str:
+    wide_class = " student-line-field--wide" if wide else ""
+    return f"""
+<div class="student-line-field{wide_class}">
+  <span class="student-line-field__label">{html.escape(label)}</span>
+  <span class="student-line-field__line"></span>
+</div>
+"""
+
+
+def render_student_print_css() -> str:
+    return """      :root {
+        color-scheme: light;
+        --paper: #ffffff;
+        --ink: #111111;
+        --muted: #444444;
+        --rule: #222222;
+        --border: #1f1f1f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      @page {
+        size: A4 portrait;
+        margin: 0;
+      }
+
+      html,
+      body {
+        background: #f0f0f0;
+        color: var(--ink);
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        display: flex;
+        flex-direction: column;
+        gap: 10mm;
+        padding: 8mm 0;
+      }
+
+      .sheet-page {
+        background: var(--paper);
+        box-shadow: 0 6mm 16mm rgba(0, 0, 0, 0.12);
+        break-after: page;
+        display: flex;
+        flex-direction: column;
+        margin: 0 auto;
+        height: 297mm;
+        padding: 16mm 17mm 15mm;
+        width: 210mm;
+      }
+
+      .sheet-page:last-child {
+        break-after: auto;
+      }
+
+      .sheet-header {
+        align-items: start;
+        display: grid;
+        gap: 5mm;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 27mm;
+      }
+
+      .sheet-header__institution,
+      .sheet-header__title {
+        min-height: 27mm;
+      }
+
+      .sheet-header__institution {
+        font-size: 10.2pt;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        line-height: 1.35;
+        padding-top: 1.5mm;
+        text-transform: uppercase;
+      }
+
+      .sheet-header__title {
+        align-items: center;
+        display: flex;
+        font-size: 15pt;
+        font-weight: 700;
+        justify-content: center;
+        letter-spacing: 0.03em;
+        line-height: 1.2;
+        padding: 0 4mm;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      .sheet-header__qr {
+        align-items: center;
+        border: 0.3mm solid var(--rule);
+        display: flex;
+        height: 27mm;
+        justify-content: center;
+        justify-self: end;
+        overflow: hidden;
+        padding: 1.2mm;
+        width: 27mm;
+      }
+
+      .sheet-header__qr svg {
+        display: block;
+        height: 100% !important;
+        max-height: 100%;
+        max-width: 100%;
+        width: 100% !important;
+      }
+
+      .sheet-header-rule {
+        border-bottom: 0.35mm solid var(--rule);
+        margin: 3mm 0 5mm;
+      }
+
+      .sheet-body {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 4.5mm;
+      }
+
+      .sheet-footer {
+        border-top: 0.2mm solid #666666;
+        color: var(--muted);
+        font-size: 9pt;
+        margin-top: 6mm;
+        padding-top: 3mm;
+        text-align: center;
+      }
+
+      .section-block {
+        border: 0.3mm solid var(--border);
+        padding: 4.5mm;
+      }
+
+      .section-block__title {
+        font-size: 10.5pt;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        margin: 0 0 3.5mm;
+        text-transform: uppercase;
+      }
+
+      .student-line-grid {
+        display: grid;
+        gap: 4mm;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .student-line-field {
+        display: flex;
+        flex-direction: column;
+        gap: 2.3mm;
+      }
+
+      .student-line-field--wide {
+        grid-column: 1 / -1;
+      }
+
+      .student-line-field__label {
+        font-size: 9pt;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .student-line-field__line {
+        border-bottom: 0.3mm solid var(--rule);
+        display: block;
+        min-height: 7mm;
+      }
+
+      .exam-detail-grid {
+        display: grid;
+        gap: 3mm 5mm;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .exam-detail {
+        border: 0.2mm solid #777777;
+        min-height: 16mm;
+        padding: 2.8mm 3.2mm;
+      }
+
+      .exam-detail__label {
+        display: block;
+        font-size: 8.6pt;
+        font-weight: 700;
+        margin-bottom: 1.6mm;
+        text-transform: uppercase;
+      }
+
+      .exam-detail__value {
+        border-bottom: 0.25mm solid var(--rule);
+        display: block;
+        font-size: 10.3pt;
+        min-height: 5.6mm;
+        padding-bottom: 0.7mm;
+      }
+
+      .exam-detail__value--blank {
+        color: transparent;
+      }
+
+      .rules-list {
+        font-size: 10.2pt;
+        line-height: 1.45;
+        margin: 0;
+        padding-left: 5.4mm;
+      }
+
+      .rules-list li + li {
+        margin-top: 1.5mm;
+      }
+
+      .instruction-line {
+        border-top: 0.2mm solid #777777;
+        font-size: 10.7pt;
+        font-weight: 700;
+        margin: 4mm 0 0;
+        padding-top: 3.2mm;
+      }
+
+      .question-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 4.8mm;
+      }
+
+      .question-block {
+        border: 0.3mm solid var(--border);
+        break-inside: avoid;
+        page-break-inside: avoid;
+        padding: 4.2mm 4.6mm;
+      }
+
+      .question-block__number {
+        font-size: 10pt;
+        font-weight: 700;
+        margin: 0 0 2.2mm;
+        text-transform: uppercase;
+      }
+
+      .question-block__text {
+        font-size: 11pt;
+        line-height: 1.45;
+        margin: 0;
+      }
+
+      .choice-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2.4mm;
+        list-style: none;
+        margin: 4mm 0 0;
+        padding: 0;
+      }
+
+      .choice-list li {
+        align-items: start;
+        border: 0.2mm solid #888888;
+        display: grid;
+        gap: 3mm;
+        grid-template-columns: 7mm minmax(0, 1fr);
+        padding: 2.6mm 3mm;
+      }
+
+      .choice-key {
+        font-weight: 700;
+      }
+
+      .choice-text {
+        line-height: 1.4;
+      }
+
+      .sheet-page--question {
+        padding: 11mm 14mm 10mm;
+      }
+
+      .sheet-page--question .sheet-header {
+        gap: 3mm;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) 19mm;
+      }
+
+      .sheet-page--question .sheet-header__institution,
+      .sheet-page--question .sheet-header__title {
+        min-height: 19mm;
+      }
+
+      .sheet-page--question .sheet-header__institution {
+        font-size: 8.4pt;
+        line-height: 1.25;
+        padding-top: 0.8mm;
+      }
+
+      .sheet-page--question .sheet-header__title {
+        font-size: 11.5pt;
+        letter-spacing: 0.02em;
+        line-height: 1.15;
+        padding: 0 2mm;
+      }
+
+      .sheet-page--question .sheet-header__qr {
+        height: 19mm;
+        padding: 0.8mm;
+        width: 19mm;
+      }
+
+      .sheet-page--question .sheet-header-rule {
+        margin: 2mm 0 3mm;
+      }
+
+      .sheet-page--question .sheet-footer {
+        font-size: 8pt;
+        margin-top: 3.5mm;
+        padding-top: 2mm;
+      }
+
+      .sheet-page--question .question-stack {
+        gap: 2.4mm;
+      }
+
+      .sheet-page--question .question-block {
+        padding: 2.6mm 3mm;
+      }
+
+      .sheet-page--question .question-block__number {
+        font-size: 8.8pt;
+        margin-bottom: 1.4mm;
+      }
+
+      .sheet-page--question .question-block__text {
+        font-size: 9.8pt;
+        line-height: 1.28;
+      }
+
+      .sheet-page--question .choice-list {
+        gap: 1.2mm;
+        margin-top: 2.2mm;
+      }
+
+      .sheet-page--question .choice-list li {
+        gap: 2mm;
+        grid-template-columns: 5.4mm minmax(0, 1fr);
+        padding: 1.5mm 1.8mm;
+      }
+
+      .sheet-page--question .choice-key,
+      .sheet-page--question .choice-text {
+        font-size: 9.2pt;
+        line-height: 1.22;
+      }
+
+      .pagination-measure {
+        left: -1000vw;
+        pointer-events: none;
+        position: absolute;
+        top: 0;
+        visibility: hidden;
+      }
+
+      @media print {
+        html,
+        body {
+          background: #fff;
+          padding: 0;
+        }
+
+        body {
+          display: block;
+        }
+
+        .sheet-page {
+          box-shadow: none;
+          margin: 0;
+        }
+      }
+"""
+
+
+def render_student_cover_page(
+    exam_set: dict[str, Any],
+    variant: dict[str, Any],
+    page_number: int,
+) -> str:
+    print_settings = get_print_settings(exam_set)
+    rules_markup = "".join(
+        f"<li>{html.escape(rule)}</li>" for rule in print_settings["examRules"]
+    )
+    student_info = "".join(
+        [
+            render_student_line_field("Student Name", wide=True),
+            render_student_line_field("Student ID"),
+            render_student_line_field("Class / Section"),
+            render_student_line_field("Signature", wide=True),
+        ]
+    )
+    exam_details = "".join(
+        [
+            render_exam_detail("Exam Name", print_settings["examName"]),
+            render_exam_detail("Course / Subject", print_settings["courseName"]),
+            render_exam_detail("Exam Date", print_settings["examDate"]),
+            render_exam_detail("Start Time", print_settings["startTime"]),
+            render_exam_detail("Total Time in Minutes", print_settings["totalTimeMinutes"]),
+            render_exam_detail("Number of Questions", str(len(variant.get("questions", [])))),
+            render_exam_detail(
+                "Number of Pages",
+                '<span class="js-total-pages">1</span>',
+                escape_value=False,
+            ),
+        ]
+    )
+
+    return f"""
+<section class="sheet-page">
+  <header class="sheet-header">
+    <div class="sheet-header__institution">{html.escape(print_settings["institutionName"])}</div>
+    <div class="sheet-header__title">{html.escape(print_settings["examName"])}</div>
+    {render_variant_qr_markup(exam_set, variant)}
+  </header>
+  <div class="sheet-header-rule"></div>
+  <main class="sheet-body">
+    <section class="section-block">
+      <h2 class="section-block__title">Student Information</h2>
+      <div class="student-line-grid">{student_info}</div>
+    </section>
+    <section class="section-block">
+      <h2 class="section-block__title">Exam Information</h2>
+      <div class="exam-detail-grid">{exam_details}</div>
+    </section>
+    <section class="section-block">
+      <h2 class="section-block__title">Exam Rules</h2>
+      <ol class="rules-list">{rules_markup}</ol>
+    </section>
+  </main>
+  <footer class="sheet-footer">Page <span class="js-page-number">{page_number}</span> of <span class="js-total-pages">1</span></footer>
+</section>
+"""
+
+
+def render_student_question_blocks(variant: dict[str, Any]) -> str:
+    question_by_position = {
+        question["position"]: question for question in variant.get("questions", [])
+    }
+    question_blocks: list[str] = []
+
+    for position in sorted(question_by_position):
+        question = question_by_position[position]
+        choices = "".join(
+            f"""
+<li>
+  <span class="choice-key">{html.escape(choice['key'])}.</span>
+  <span class="choice-text">{html.escape(choice['text'])}</span>
+</li>
+"""
+            for choice in question["displayChoices"]
+        )
+        question_blocks.append(
+            f"""
+<article class="question-block" data-question-position="{question['position']}">
+  <p class="question-block__number">Question {question['position']}</p>
+  <p class="question-block__text">{html.escape(question['question'])}</p>
+  <ul class="choice-list">{choices}</ul>
+</article>
+"""
+        )
+
+    return "".join(question_blocks)
+
+
+def render_student_question_page_template(
+    exam_set: dict[str, Any],
+    variant: dict[str, Any],
+) -> str:
+    print_settings = get_print_settings(exam_set)
+    return f"""
+<section class="sheet-page sheet-page--question">
+  <header class="sheet-header">
+    <div class="sheet-header__institution">{html.escape(print_settings["institutionName"])}</div>
+    <div class="sheet-header__title">{html.escape(print_settings["examName"])}</div>
+    {render_variant_qr_markup(exam_set, variant)}
+  </header>
+  <div class="sheet-header-rule"></div>
+  <main class="sheet-body">
+    <div class="question-stack"></div>
+  </main>
+  <footer class="sheet-footer">Page <span class="js-page-number">2</span> of <span class="js-total-pages">1</span></footer>
+</section>
+"""
+
+
+def render_student_pagination_script() -> str:
+    return """
+    <script>
+      (() => {
+        function createQuestionPage() {
+          const template = document.querySelector('#question-page-template');
+          if (!(template instanceof HTMLTemplateElement)) return null;
+          const fragment = template.content.cloneNode(true);
+          return fragment.firstElementChild;
+        }
+
+        function updatePageCounters(totalPages) {
+          document.querySelectorAll('.js-total-pages').forEach((node) => {
+            node.textContent = String(totalPages);
+          });
+        }
+
+        function paginateStudentView() {
+          const root = document.querySelector('#question-pages');
+          const measure = document.querySelector('#pagination-measure');
+          const bank = document.querySelector('#question-bank');
+          if (!(root instanceof HTMLElement) || !(measure instanceof HTMLElement) || !(bank instanceof HTMLTemplateElement)) {
+            return;
+          }
+
+          root.innerHTML = '';
+          measure.innerHTML = '';
+
+          const sourceBlocks = Array.from(bank.content.querySelectorAll('.question-block'));
+          const finalPages = [];
+          let currentPage = createQuestionPage();
+          if (!(currentPage instanceof HTMLElement)) return;
+          measure.appendChild(currentPage);
+          let currentStack = currentPage.querySelector('.question-stack');
+          if (!(currentStack instanceof HTMLElement)) return;
+
+          for (const sourceBlock of sourceBlocks) {
+            const block = sourceBlock.cloneNode(true);
+            currentStack.appendChild(block);
+            const overflows = currentPage.scrollHeight > currentPage.clientHeight;
+            if (!overflows) continue;
+
+            currentStack.removeChild(block);
+            if (currentStack.children.length === 0) {
+              currentStack.appendChild(block);
+              finalPages.push(currentPage);
+              currentPage = createQuestionPage();
+              if (!(currentPage instanceof HTMLElement)) return;
+              measure.appendChild(currentPage);
+              currentStack = currentPage.querySelector('.question-stack');
+              if (!(currentStack instanceof HTMLElement)) return;
+              continue;
+            }
+
+            finalPages.push(currentPage);
+            currentPage = createQuestionPage();
+            if (!(currentPage instanceof HTMLElement)) return;
+            measure.appendChild(currentPage);
+            currentStack = currentPage.querySelector('.question-stack');
+            if (!(currentStack instanceof HTMLElement)) return;
+            currentStack.appendChild(block);
+          }
+
+          if (currentStack.children.length > 0) {
+            finalPages.push(currentPage);
+          } else {
+            currentPage.remove();
+          }
+
+          finalPages.forEach((page, index) => {
+            const pageNumber = index + 2;
+            const pageNumberNode = page.querySelector('.js-page-number');
+            if (pageNumberNode) pageNumberNode.textContent = String(pageNumber);
+            root.appendChild(page);
+          });
+
+          updatePageCounters(finalPages.length + 1);
+        }
+
+        let scheduled = false;
+        function schedulePagination() {
+          if (scheduled) return;
+          scheduled = true;
+          requestAnimationFrame(() => {
+            scheduled = false;
+            paginateStudentView();
+          });
+        }
+
+        window.addEventListener('DOMContentLoaded', schedulePagination, { once: true });
+        window.addEventListener('load', schedulePagination, { once: true });
+        window.addEventListener('resize', schedulePagination);
+        window.addEventListener('beforeprint', paginateStudentView);
+      })();
+    </script>
 """
 
 
 def render_variant_html(exam_set: dict[str, Any], variant: dict[str, Any]) -> str:
     print_settings = get_print_settings(exam_set)
-    summary = render_meta_cards(
-        [
-            ("Exam Name", print_settings["examName"]),
-            ("Course Name", print_settings["courseName"]),
-            ("Exam Date", print_settings["examDate"]),
-        ]
-    )
-
-    question_sections: list[str] = []
-    for question in variant["questions"]:
-        choices = "".join(
-            f"<li>{html.escape(choice['key'])}. {html.escape(choice['text'])}</li>"
-            for choice in question["displayChoices"]
-        )
-        question_sections.append(
-            f"""
-<section class="question">
-  <div class="question-head">Question {question['position']} · {html.escape(question['sourceQuestionId'])} · Difficulty {question['difficulty']}</div>
-  <p class="question-title">{html.escape(question['question'])}</p>
-  <ul class="choice-list">{choices}</ul>
-</section>
+    return f"""<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{html.escape(print_settings["examName"])}</title>
+    <style>
+{render_student_print_css()}
+    </style>
+  </head>
+  <body>
+    {render_student_cover_page(exam_set, variant, 1)}
+    <div id="question-pages"></div>
+    <template id="question-bank">
+      {render_student_question_blocks(variant)}
+    </template>
+    <template id="question-page-template">
+      {render_student_question_page_template(exam_set, variant)}
+    </template>
+    <div id="pagination-measure" class="pagination-measure" aria-hidden="true"></div>
+{render_student_pagination_script()}
+  </body>
+</html>
 """
-        )
-
-    body = summary + "".join(question_sections)
-    html_output = render_printable_html(
-        title=print_settings["examName"],
-        subtitle="Printable student form with QR-based grading lookup.",
-        body_html=body,
-    )
-    qr_markup = render_variant_qr_markup(exam_set, variant)
-    html_output = html_output.replace('<body>', "<body>\n" + qr_markup, 1)
-    html_output = html_output.replace('class="page"', 'class="page page--student"', 1)
-    return html_output
 
 
 def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
@@ -939,6 +1617,7 @@ def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
     buffer = io.BytesIO()
     variants = [variant for variant in exam_set.get("variants", []) if isinstance(variant, dict)]
     annotate_variant_printables(variants)
+    annotate_variant_print_layouts(variants)
     base_folder = str(exam_set.get("printableFolderName") or DEFAULT_PRINTABLE_FOLDER)
     question_pool_name = str(exam_set.get("questionPoolFileName") or QUESTION_POOL_PRINTABLE_NAME)
 
@@ -1047,6 +1726,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             exam_set, variant = record
+            annotate_variant_printables([variant])
+            annotate_variant_print_layouts([variant])
             self.send_json(
                 {
                     "examStorePath": str(state.exam_store_path),

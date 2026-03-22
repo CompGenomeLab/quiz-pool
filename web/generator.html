@@ -48,6 +48,10 @@
             </div>
             <div class="field-grid">
               <label class="field field--full">
+                <span>Institution Name</span>
+                <input id="institution-name" type="text" />
+              </label>
+              <label class="field field--full">
                 <span>Exam Name</span>
                 <input id="exam-name" type="text" />
               </label>
@@ -58,6 +62,18 @@
               <label class="field">
                 <span>Exam Date</span>
                 <input id="exam-date" type="date" />
+              </label>
+              <label class="field">
+                <span>Start Time</span>
+                <input id="start-time" type="time" />
+              </label>
+              <label class="field">
+                <span>Total Time (Minutes)</span>
+                <input id="total-time-minutes" type="number" min="1" step="1" />
+              </label>
+              <label class="field field--full">
+                <span>Exam Rules</span>
+                <textarea id="exam-rules" rows="6" placeholder="One rule per line"></textarea>
               </label>
             </div>
           </div>
