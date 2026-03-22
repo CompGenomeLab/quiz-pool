@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/quiz-pool.schema.json",
+  "title": "Quiz Pool",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "learningObjectives", "questions"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Name of the quiz pool"
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional description of the quiz pool"
+    },
+    "learningObjectives": {
+      "type": "array",
+      "description": "Master list of exactly 6 learning objectives",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "$ref": "#/$defs/learningObjective"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/question"
+      }
+    }
+  },
+  "$defs": {
+    "learningObjective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": ["LO1", "LO2", "LO3", "LO4", "LO5", "LO6"]
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "question",
+        "choices",
+        "shuffleChoices",
+        "learningObjectiveIds",
+        "correctAnswers",
+        "bookLocations",
+        "difficulty"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the question"
+        },
+        "question": {
+          "type": "string",
+          "description": "Question text"
+        },
+        "choices": {
+          "type": "array",
+          "description": "Exactly 4 answer choices labeled A-D",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/choice"
+          },
+          "allOf": [
+            {
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "key": { "const": "A" }
+                },
+                "required": ["key"]
+              }
+            },
+            {
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "key": { "const": "B" }
+                },
+                "required": ["key"]
+              }
+            },
+            {
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "key": { "const": "C" }
+                },
+                "required": ["key"]
+              }
+            },
+            {
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "key": { "const": "D" }
+                },
+                "required": ["key"]
+              }
+            }
+          ]
+        },
+        "shuffleChoices": {
+          "type": "boolean",
+          "description": "Whether choices should be shuffled when presented"
+        },
+        "learningObjectiveIds": {
+          "type": "array",
+          "description": "One or more learning objectives covered by this question",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["LO1", "LO2", "LO3", "LO4", "LO5", "LO6"]
+          }
+        },
+        "correctAnswers": {
+          "type": "array",
+          "description": "One or more correct answer keys",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["A", "B", "C", "D"]
+          }
+        },
+        "bookLocations": {
+          "type": "array",
+          "description": "One or more relevant places in the book for this question",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/bookLocation"
+          }
+        },
+        "difficulty": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Difficulty rating from 1 to 5"
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Optional explanation for the correct answer(s)"
+        }
+      }
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "text"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": ["A", "B", "C", "D"]
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "bookLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chapter"],
+      "properties": {
+        "chapter": {
+          "type": "string",
+          "description": "Chapter reference, e.g. Chapter 3"
+        },
+        "section": {
+          "type": "string",
+          "description": "Optional section reference"
+        },
+        "page": {
+          "type": ["integer", "string"],
+          "description": "Optional page number or page range"
+        },
+        "reference": {
+          "type": "string",
+          "description": "Optional free-text note about the book location"
+        }
+      }
+    }
+  }
+}

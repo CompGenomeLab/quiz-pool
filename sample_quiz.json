@@ -1,0 +1,102 @@
+{
+  "title": "Random General Knowledge Mini Quiz",
+  "description": "A simple two-question quiz pool generated to match scheme.json.",
+  "learningObjectives": [
+    {
+      "id": "LO1",
+      "label": "Recall basic world geography facts."
+    },
+    {
+      "id": "LO2",
+      "label": "Identify well-known astronomy facts."
+    },
+    {
+      "id": "LO3",
+      "label": "Distinguish correct answers from plausible distractors."
+    },
+    {
+      "id": "LO4",
+      "label": "Practice reading multiple-choice questions carefully."
+    },
+    {
+      "id": "LO5",
+      "label": "Associate topics with supporting references."
+    },
+    {
+      "id": "LO6",
+      "label": "Build confidence with short quiz formats."
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "What is the capital city of Japan?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Seoul"
+        },
+        {
+          "key": "B",
+          "text": "Tokyo"
+        },
+        {
+          "key": "C",
+          "text": "Beijing"
+        },
+        {
+          "key": "D",
+          "text": "Bangkok"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO1", "LO3", "LO4"],
+      "correctAnswers": ["B"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "World Capitals",
+          "page": "4-5",
+          "reference": "Overview table of major capitals in Asia."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "Tokyo is the capital of Japan."
+    },
+    {
+      "id": "Q2",
+      "question": "Which planet is the largest in our solar system?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Mars"
+        },
+        {
+          "key": "B",
+          "text": "Earth"
+        },
+        {
+          "key": "C",
+          "text": "Jupiter"
+        },
+        {
+          "key": "D",
+          "text": "Venus"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": ["LO2", "LO3", "LO6"],
+      "correctAnswers": ["C"],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "The Solar System",
+          "page": 12,
+          "reference": "Planet size comparison diagram."
+        }
+      ],
+      "difficulty": 1,
+      "explanation": "Jupiter is the largest planet in the solar system."
+    }
+  ]
+}

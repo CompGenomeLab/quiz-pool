@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exam Variant Generator</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="panel masthead no-print">
+        <div class="masthead__copy">
+          <p class="eyebrow">Quiz Pool</p>
+          <h1>Exam Variant Generator</h1>
+          <p class="sidebar__copy">
+            Build one shared exam set from the question pool, then generate unique shuffled variants with
+            traceable IDs for grading later.
+          </p>
+        </div>
+        <nav class="page-links">
+          <a class="page-link" href="/index.html">Editor</a>
+          <a class="page-link is-active" href="/generator.html">Exam Generator</a>
+        </nav>
+      </header>
+
+      <div class="generator-layout">
+        <aside class="panel generator-controls no-print">
+          <div>
+            <p class="eyebrow">Generator</p>
+            <h2>Pool Decisions</h2>
+            <p class="helper-copy">
+              Filters define the shared exam set. Variants change only question order and allowed choice order.
+            </p>
+          </div>
+
+          <div class="status-card">
+            <p class="status-card__label">Quiz Database</p>
+            <p id="db-path" class="status-card__value"></p>
+            <p class="status-card__label">Exam Store</p>
+            <p id="exam-store-path" class="status-card__value"></p>
+            <p id="generator-status" class="status-card__hint">Loading quiz data...</p>
+          </div>
+
+          <div class="stack">
+            <div class="panel__subhead">
+              <h3>Printable Metadata</h3>
+              <p>These fields are written into each student printable and the shared question-pool document.</p>
+            </div>
+            <div class="field-grid">
+              <label class="field field--full">
+                <span>Exam Name</span>
+                <input id="exam-name" type="text" />
+              </label>
+              <label class="field">
+                <span>Course Name</span>
+                <input id="course-name" type="text" />
+              </label>
+              <label class="field">
+                <span>Exam Date</span>
+                <input id="exam-date" type="date" />
+              </label>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Questions Per Exam</span>
+              <input id="question-count" type="number" min="1" step="1" />
+            </label>
+            <label class="field">
+              <span>Unique Variants</span>
+              <input id="variant-count" type="number" min="1" step="1" />
+            </label>
+          </div>
+
+          <div class="summary-grid">
+            <div class="metric">
+              <span class="metric__label">Filtered Pool</span>
+              <span id="filtered-count" class="metric__value">0</span>
+            </div>
+            <div class="metric">
+              <span class="metric__label">Available After Overrides</span>
+              <span id="available-count" class="metric__value">0</span>
+            </div>
+            <div class="metric">
+              <span class="metric__label">Force Included</span>
+              <span id="included-count" class="metric__value">0</span>
+            </div>
+            <div class="metric">
+              <span class="metric__label">Force Excluded</span>
+              <span id="excluded-count" class="metric__value">0</span>
+            </div>
+          </div>
+
+          <div class="filter-stack">
+            <section>
+              <div class="panel__subhead">
+                <h3>Chapter Filter</h3>
+                <p>Questions match if any book location chapter is selected.</p>
+              </div>
+              <div id="chapter-filters" class="filter-chip-list"></div>
+            </section>
+
+            <section>
+              <div class="panel__subhead">
+                <h3>Difficulty Filter</h3>
+                <p>Leave empty to allow every difficulty.</p>
+              </div>
+              <div id="difficulty-filters" class="filter-chip-list"></div>
+            </section>
+
+            <section>
+              <div class="panel__subhead">
+                <h3>Learning Objective Filter</h3>
+                <p>Questions match if they cover any selected objective.</p>
+              </div>
+              <div id="objective-filters" class="filter-chip-list"></div>
+            </section>
+          </div>
+
+          <div class="sidebar__actions">
+            <button id="generate-exams" class="button button--primary" type="button">Generate Variants</button>
+            <button id="export-json" class="button button--ghost" type="button" disabled>Export JSON</button>
+          </div>
+
+          <div class="sidebar__actions">
+            <button id="print-results" class="button button--ghost" type="button" disabled>Download Print ZIP</button>
+            <button id="reset-overrides" class="button button--ghost" type="button">Reset Overrides</button>
+          </div>
+        </aside>
+
+        <main class="generator-main">
+          <section id="generator-errors" class="panel panel--error hidden no-print">
+            <div class="panel__subhead">
+              <h3>Generation Errors</h3>
+              <p>Fix these issues before creating exam variants.</p>
+            </div>
+            <ul id="generator-error-list" class="error-list"></ul>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <div>
+                <p class="eyebrow">Question Pool</p>
+                <h2>Eligibility And Overrides</h2>
+              </div>
+            </div>
+            <p class="helper-copy">
+              Use row overrides to force-include or force-exclude questions regardless of the current filters.
+            </p>
+            <div class="table-wrap">
+              <table class="pool-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Prompt</th>
+                    <th>Chapters</th>
+                    <th>Difficulty</th>
+                    <th>Objectives</th>
+                    <th>Shuffle Choices</th>
+                    <th>Status</th>
+                    <th>Override</th>
+                  </tr>
+                </thead>
+                <tbody id="pool-table-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div id="generation-results" class="results-stack hidden">
+            <section class="panel no-print">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Generated Run</p>
+                  <h2 id="result-heading">Exam Variant Set</h2>
+                </div>
+              </div>
+              <div class="result-summary">
+                <div class="metric">
+                  <span class="metric__label">Exam Set ID</span>
+                  <span id="result-exam-set-id" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Generated At</span>
+                  <span id="result-generated-at" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Selected Questions</span>
+                  <span id="result-selected-count" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Variants</span>
+                  <span id="result-variant-count" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Exam Name</span>
+                  <span id="result-exam-name" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Course Name</span>
+                  <span id="result-course-name" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Exam Date</span>
+                  <span id="result-exam-date" class="metric__value"></span>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel teacher-panel no-print">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Teacher View</p>
+                  <h2>Answer Key Summary</h2>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="pool-table">
+                  <thead>
+                    <tr>
+                      <th>Variant ID</th>
+                      <th>Question #</th>
+                      <th>Source Question</th>
+                      <th>Displayed Correct</th>
+                      <th>Source Correct</th>
+                    </tr>
+                  </thead>
+                  <tbody id="teacher-summary-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel student-panel">
+              <div class="panel__head no-print">
+                <div>
+                  <p class="eyebrow">Student View</p>
+                  <h2>Printable Variants</h2>
+                </div>
+              </div>
+              <p class="helper-copy no-print">
+                The ZIP download includes one printable question-pool document and one printable HTML file per
+                student variant.
+              </p>
+              <div id="variant-previews" class="variant-stack"></div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/generator.js"></script>
+  </body>
+</html>

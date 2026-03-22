@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quiz Pool Editor</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="sidebar__header">
+          <p class="eyebrow">Quiz Pool</p>
+          <h1>Question Editor</h1>
+          <p class="sidebar__copy">
+            Edit the quiz JSON file directly from the browser. Saves are validated against the schema.
+          </p>
+          <nav class="page-links">
+            <a class="page-link is-active" href="/index.html">Editor</a>
+            <a class="page-link" href="/generator.html">Exam Generator</a>
+          </nav>
+        </div>
+
+        <div class="sidebar__actions">
+          <button id="add-question" class="button button--primary" type="button">Add Question</button>
+          <button id="reload-quiz" class="button button--ghost" type="button">Reload</button>
+        </div>
+
+        <div id="reload-notice" class="notice notice--warning hidden" role="alert">
+          <p class="notice__title">Unsaved changes</p>
+          <p class="notice__copy">Reloading now will discard local edits. Do you want to continue?</p>
+          <div class="notice__actions">
+            <button id="confirm-reload" class="button button--danger" type="button">Discard And Reload</button>
+            <button id="cancel-reload" class="button button--ghost" type="button">Cancel</button>
+          </div>
+        </div>
+
+        <div class="status-card">
+          <p class="status-card__label">Database</p>
+          <p id="db-path" class="status-card__value"></p>
+          <p id="save-status" class="status-card__hint">Loading quiz data...</p>
+        </div>
+
+        <div id="question-list" class="question-list"></div>
+      </aside>
+
+      <main class="editor">
+        <section class="panel panel--meta">
+          <div class="panel__head">
+            <div>
+              <p class="eyebrow">Quiz Meta</p>
+              <h2>Pool Settings</h2>
+            </div>
+            <button id="save-quiz" class="button button--primary" type="button">Save Changes</button>
+          </div>
+
+          <div class="field-grid field-grid--meta">
+            <label class="field">
+              <span>Title</span>
+              <input id="quiz-title" type="text" />
+            </label>
+
+            <label class="field field--full">
+              <span>Description</span>
+              <textarea id="quiz-description" rows="3"></textarea>
+            </label>
+          </div>
+
+          <div class="objective-block">
+            <div class="panel__subhead">
+              <h3>Learning Objectives</h3>
+              <p>These labels are global and are referenced by each question.</p>
+            </div>
+            <div id="learning-objectives" class="objective-grid"></div>
+          </div>
+        </section>
+
+        <section id="error-panel" class="panel panel--error hidden">
+          <div class="panel__subhead">
+            <h3>Validation Errors</h3>
+            <p>Fix these issues before the quiz can be written to disk.</p>
+          </div>
+          <ul id="error-list" class="error-list"></ul>
+        </section>
+
+        <section class="panel panel--question">
+          <div class="panel__head">
+            <div>
+              <p class="eyebrow">Question</p>
+              <h2 id="question-heading">Select a question</h2>
+            </div>
+            <button id="delete-question" class="button button--danger" type="button">Delete Question</button>
+          </div>
+
+          <div id="empty-state" class="empty-state">
+            <p>Select a question on the left to start editing.</p>
+          </div>
+
+          <div id="question-editor" class="question-editor hidden">
+            <div class="field-grid">
+              <label class="field">
+                <span>Question ID</span>
+                <input id="question-id" type="text" />
+              </label>
+
+              <label class="field">
+                <span>Difficulty</span>
+                <select id="question-difficulty">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                </select>
+              </label>
+
+              <label class="field field--checkbox">
+                <input id="question-shuffle" type="checkbox" />
+                <span>Shuffle choices when presenting this question</span>
+              </label>
+
+              <label class="field field--full">
+                <span>Question Text</span>
+                <textarea id="question-text" rows="4"></textarea>
+              </label>
+
+              <label class="field field--full">
+                <span>Explanation</span>
+                <textarea id="question-explanation" rows="3"></textarea>
+              </label>
+            </div>
+
+            <div class="editor-grid">
+              <section class="card">
+                <div class="panel__subhead">
+                  <h3>Choices</h3>
+                  <p>Pick one or more correct answers.</p>
+                </div>
+                <div id="choices-editor" class="choices-editor"></div>
+              </section>
+
+              <section class="card">
+                <div class="panel__subhead">
+                  <h3>Learning Objective Links</h3>
+                  <p>Attach this question to one or more objectives.</p>
+                </div>
+                <div id="question-objectives" class="checkbox-stack"></div>
+              </section>
+            </div>
+
+            <section class="card">
+              <div class="panel__subhead">
+                <h3>Book Locations</h3>
+                <p>Provide one or more references for the question.</p>
+              </div>
+              <div id="book-locations" class="book-locations"></div>
+              <button id="add-location" class="button button--ghost" type="button">Add Location</button>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="objective-template">
+      <label class="field">
+        <span></span>
+        <input type="text" />
+      </label>
+    </template>
+
+    <template id="choice-template">
+      <div class="choice-row">
+        <label class="choice-row__correct">
+          <input type="checkbox" />
+          <span></span>
+        </label>
+        <label class="field">
+          <span>Choice Text</span>
+          <input type="text" />
+        </label>
+      </div>
+    </template>
+
+    <template id="objective-link-template">
+      <label class="checkbox-pill">
+        <input type="checkbox" />
+        <span></span>
+      </label>
+    </template>
+
+    <template id="location-template">
+      <div class="location-card">
+        <div class="location-card__head">
+          <strong>Reference</strong>
+          <button class="button button--tiny button--danger" type="button">Remove</button>
+        </div>
+        <div class="field-grid">
+          <label class="field">
+            <span>Chapter</span>
+            <input data-key="chapter" type="text" />
+          </label>
+          <label class="field">
+            <span>Section</span>
+            <input data-key="section" type="text" />
+          </label>
+          <label class="field">
+            <span>Page</span>
+            <input data-key="page" type="text" />
+          </label>
+          <label class="field field--full">
+            <span>Reference Note</span>
+            <textarea data-key="reference" rows="2"></textarea>
+          </label>
+        </div>
+      </div>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
