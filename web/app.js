@@ -53,6 +53,36 @@ const templates = {
   objectiveLink: document.querySelector("#objective-link-template"),
 };
 
+function hasUnsavedChanges() {
+  return state.isDirty;
+}
+
+function confirmDiscardUnsavedChanges() {
+  if (!hasUnsavedChanges()) {
+    return true;
+  }
+  return window.confirm("You have unsaved changes. Leaving this page will discard them. Continue?");
+}
+
+function wireNavigationGuards() {
+  for (const link of document.querySelectorAll(".page-link")) {
+    link.addEventListener("click", (event) => {
+      if (confirmDiscardUnsavedChanges()) {
+        return;
+      }
+      event.preventDefault();
+    });
+  }
+
+  window.addEventListener("beforeunload", (event) => {
+    if (!hasUnsavedChanges()) {
+      return;
+    }
+    event.preventDefault();
+    event.returnValue = "";
+  });
+}
+
 function getSelectedQuestion() {
   if (!state.quiz) {
     return null;
@@ -624,6 +654,7 @@ function wireGlobalFields() {
 }
 
 wireGlobalFields();
+wireNavigationGuards();
 loadQuiz().catch((error) => {
   console.error(error);
   setStatus(error.message, true);
