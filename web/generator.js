@@ -423,25 +423,26 @@ function renderGeneratedRun() {
     meta.textContent = metaParts.join(" · ") || "Generated from the current quiz pool.";
     headingBlock.append(eyebrow, title, meta);
 
-    const ids = document.createElement("div");
-    ids.className = "variant-card__ids";
-    for (const [labelText, value] of [
-      ["Exam Set", run.examSetId],
-      ["Variant", variant.variantId],
-    ]) {
-      const metric = document.createElement("div");
-      metric.className = "metric";
-      const label = document.createElement("span");
-      label.className = "metric__label";
-      label.textContent = labelText;
-      const valueNode = document.createElement("span");
-      valueNode.className = "metric__value";
-      valueNode.textContent = value;
-      metric.append(label, valueNode);
-      ids.append(metric);
-    }
+    const qr = document.createElement("aside");
+    qr.className = "variant-card__qr";
 
-    header.append(headingBlock, ids);
+    const qrImage = document.createElement("img");
+    qrImage.className = "variant-card__qr-image";
+    qrImage.alt = "Variant tracking QR code";
+    qrImage.loading = "lazy";
+    qrImage.src = `/api/exams/variant-qr/${encodeURIComponent(variant.variantId)}.svg`;
+
+    const qrLabel = document.createElement("p");
+    qrLabel.className = "variant-card__qr-label";
+    qrLabel.textContent = "Variant QR";
+
+    const qrCopy = document.createElement("p");
+    qrCopy.className = "variant-card__qr-copy";
+    qrCopy.textContent = "Repeated on every printed page for grading lookup.";
+
+    qr.append(qrImage, qrLabel, qrCopy);
+
+    header.append(headingBlock, qr);
 
     const questionList = document.createElement("div");
     questionList.className = "question-preview-list";

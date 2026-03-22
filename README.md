@@ -23,8 +23,8 @@ Then open:
 - Generates one shared exam set and multiple unique shuffled variants of that set
 - Persists `examSetId` and `variantId` records for later answer lookup and grading
 - Lets you customize printable metadata such as exam name, course name, and exam date
-- Renders printable student variants plus a teacher answer-key summary
-- Downloads a ZIP of printable HTML documents for the shared question pool and each student variant
+- Renders printable student variants with repeated QR codes instead of visible exam/variant IDs, plus a teacher answer-key summary
+- Downloads a ZIP of printable HTML documents for the shared question pool and each student variant, using ordinal student filenames inside the archive
 - Exports the current generated exam run as JSON
 - Validates every save against `scheme.json`
 - Writes changes back to the JSON file atomically
@@ -41,3 +41,4 @@ uv run python main.py --db path/to/quiz.json --schema scheme.json --exam-store g
 - Invalid edits are rejected on save and shown in the UI.
 - Generated exams are stored in `generated_exams.json` by default, next to the quiz database.
 - The generator always builds one shared question set per run, then creates unique variant views of that set.
+- Student printables repeat a QR on every page with the raw JSON payload `{"examSetId":"...","variantId":"..."}`.

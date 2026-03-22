@@ -19,6 +19,7 @@ from uuid import uuid4
 import zipfile
 
 from jsonschema import Draft202012Validator
+import segno
 
 
 ROOT = Path(__file__).resolve().parent
@@ -27,6 +28,8 @@ DEFAULT_DB = ROOT / "sample_quiz.json"
 DEFAULT_SCHEMA = ROOT / "scheme.json"
 DEFAULT_EXAM_STORE_NAME = "generated_exams.json"
 DISPLAY_KEYS = ("A", "B", "C", "D")
+DEFAULT_PRINTABLE_FOLDER = "exam-printables"
+QUESTION_POOL_PRINTABLE_NAME = "question-pool.html"
 
 
 @dataclass
@@ -465,6 +468,31 @@ def build_variant(
     return variant
 
 
+def build_variant_printable_filename(position: int, total: int) -> str:
+    width = max(2, len(str(max(total, 1))))
+    return f"student-variant-{position:0{width}d}.html"
+
+
+def annotate_variant_printables(variants: list[dict[str, Any]]) -> None:
+    total = len(variants)
+    for index, variant in enumerate(variants, start=1):
+        variant["printableOrdinal"] = index
+        variant["printableFileName"] = build_variant_printable_filename(index, total)
+
+
+def build_variant_qr_payload(exam_set_id: str, variant_id: str) -> str:
+    return json.dumps(
+        {"examSetId": exam_set_id, "variantId": variant_id},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def render_variant_qr_svg(exam_set_id: str, variant_id: str) -> str:
+    qr_code = segno.make(build_variant_qr_payload(exam_set_id, variant_id))
+    return qr_code.svg_inline(scale=4, border=1)
+
+
 def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     question_by_id, order_by_id, question_errors = build_question_index(quiz)
     if question_errors:
@@ -535,6 +563,7 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
     variants = [
         build_variant(selected_questions, rank, exam_set_id, objective_labels) for rank in ranks
     ]
+    annotate_variant_printables(variants)
 
     return {
         "examSetId": exam_set_id,
@@ -549,6 +578,8 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
             "courseName": request["courseName"],
             "examDate": request["examDate"],
         },
+        "printableFolderName": DEFAULT_PRINTABLE_FOLDER,
+        "questionPoolFileName": QUESTION_POOL_PRINTABLE_NAME,
         "selection": {
             "questionCount": request["questionCount"],
             "variantCount": request["variantCount"],
@@ -629,6 +660,7 @@ def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
         margin: 0 auto;
         max-width: 920px;
         padding: 28px;
+        position: relative;
       }}
 
       .eyebrow {{
@@ -711,10 +743,52 @@ def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
         background: rgba(20, 108, 89, 0.07);
       }}
 
+      .page--student {{
+        padding-right: 172px;
+      }}
+
+      .student-qr {{
+        align-items: center;
+        background: rgba(248, 245, 236, 0.96);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        position: absolute;
+        right: 28px;
+        text-align: center;
+        top: 28px;
+        width: 126px;
+      }}
+
+      .student-qr svg {{
+        display: block;
+        height: auto;
+        width: 100%;
+      }}
+
+      .student-qr__label {{
+        color: #146c59;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        margin: 0;
+        text-transform: uppercase;
+      }}
+
+      .student-qr__copy {{
+        color: var(--muted);
+        font-size: 0.78rem;
+        line-height: 1.35;
+        margin: 0;
+      }}
+
       @media print {{
         body {{
           background: #fff;
-          padding: 0;
+          padding: 12mm;
         }}
 
         .page {{
@@ -723,6 +797,20 @@ def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
           box-shadow: none;
           max-width: none;
           padding: 0;
+        }}
+
+        .page--student {{
+          padding-right: 42mm;
+        }}
+
+        .student-qr {{
+          background: #fff;
+          border-radius: 12px;
+          padding: 8px;
+          position: fixed;
+          right: 12mm;
+          top: 12mm;
+          width: 30mm;
         }}
       }}
     </style>
@@ -797,6 +885,17 @@ def render_question_pool_html(exam_set: dict[str, Any], question_pool: list[dict
     )
 
 
+def render_variant_qr_markup(exam_set: dict[str, Any], variant: dict[str, Any]) -> str:
+    qr_svg = render_variant_qr_svg(exam_set["examSetId"], variant["variantId"])
+    return f"""
+<aside class="student-qr" aria-label="Variant tracking QR code">
+  {qr_svg}
+  <p class="student-qr__label">Variant QR</p>
+  <p class="student-qr__copy">Repeated on every printed page for grading lookup.</p>
+</aside>
+"""
+
+
 def render_variant_html(exam_set: dict[str, Any], variant: dict[str, Any]) -> str:
     print_settings = get_print_settings(exam_set)
     summary = render_meta_cards(
@@ -804,8 +903,6 @@ def render_variant_html(exam_set: dict[str, Any], variant: dict[str, Any]) -> st
             ("Exam Name", print_settings["examName"]),
             ("Course Name", print_settings["courseName"]),
             ("Exam Date", print_settings["examDate"]),
-            ("Exam Set", exam_set["examSetId"]),
-            ("Variant", variant["variantId"]),
         ]
     )
 
@@ -826,26 +923,37 @@ def render_variant_html(exam_set: dict[str, Any], variant: dict[str, Any]) -> st
         )
 
     body = summary + "".join(question_sections)
-    return render_printable_html(
+    html_output = render_printable_html(
         title=print_settings["examName"],
-        subtitle=f"Printable student form for variant {variant['variantId']}.",
+        subtitle="Printable student form with QR-based grading lookup.",
         body_html=body,
     )
+    qr_markup = render_variant_qr_markup(exam_set, variant)
+    html_output = html_output.replace('<body>', "<body>\n" + qr_markup, 1)
+    html_output = html_output.replace('class="page"', 'class="page page--student"', 1)
+    return html_output
 
 
 def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
     question_pool = get_question_pool_for_export(state, exam_set)
     buffer = io.BytesIO()
-    base_folder = f"exam-set-{exam_set['examSetId']}"
+    variants = [variant for variant in exam_set.get("variants", []) if isinstance(variant, dict)]
+    annotate_variant_printables(variants)
+    base_folder = str(exam_set.get("printableFolderName") or DEFAULT_PRINTABLE_FOLDER)
+    question_pool_name = str(exam_set.get("questionPoolFileName") or QUESTION_POOL_PRINTABLE_NAME)
 
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
-            f"{base_folder}/question-pool.html",
+            f"{base_folder}/{question_pool_name}",
             render_question_pool_html(exam_set, question_pool),
         )
-        for variant in exam_set.get("variants", []):
+        for variant in variants:
+            variant_file_name = str(
+                variant.get("printableFileName")
+                or build_variant_printable_filename(variant.get("printableOrdinal", 1), len(variants))
+            )
             archive.writestr(
-                f"{base_folder}/variant-{variant['variantId']}.html",
+                f"{base_folder}/{variant_file_name}",
                 render_variant_html(exam_set, variant),
             )
 
@@ -860,6 +968,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             if parsed.path == "/api/quiz":
                 self.handle_get_quiz()
+                return
+            if parsed.path.startswith("/api/exams/variant-qr/"):
+                self.handle_get_variant_qr(parsed.path)
                 return
             if parsed.path.startswith("/api/exams/variant/"):
                 self.handle_get_variant(parsed.path)
@@ -946,6 +1057,31 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     "selection": exam_set["selection"],
                     "variant": variant,
                 }
+            )
+
+        def handle_get_variant_qr(self, path: str) -> None:
+            variant_id = unquote(path.removeprefix("/api/exams/variant-qr/")).removesuffix(".svg").strip()
+            if not variant_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Variant not found")
+                return
+
+            try:
+                record = find_variant(state.exam_store_path, variant_id)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<store>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            if record is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "Variant not found")
+                return
+
+            exam_set, variant = record
+            self.send_text(
+                render_variant_qr_svg(exam_set["examSetId"], variant["variantId"]),
+                content_type="image/svg+xml; charset=utf-8",
             )
 
         def handle_export_exam_set(self, path: str) -> None:
@@ -1102,6 +1238,20 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+
+        def send_text(
+            self,
+            payload: str,
+            *,
+            content_type: str,
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
+            body = payload.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     return QuizRequestHandler
 
