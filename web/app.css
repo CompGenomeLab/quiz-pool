@@ -1,16 +1,16 @@
 :root {
-  --bg: #f3ecdc;
-  --bg-strong: #e4d2ad;
-  --panel: rgba(255, 251, 242, 0.82);
-  --panel-strong: #fff7e6;
-  --ink: #17212b;
-  --muted: #5f685f;
-  --accent: #146c59;
-  --accent-strong: #0f4d40;
-  --danger: #b2412b;
-  --danger-strong: #882d1d;
-  --border: rgba(23, 33, 43, 0.14);
-  --shadow: 0 24px 60px rgba(80, 58, 25, 0.12);
+  --bg: #eef4fb;
+  --bg-strong: #dbe7f5;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-strong: #f8fbff;
+  --ink: #1c2733;
+  --muted: #5f7286;
+  --accent: #4f7fa8;
+  --accent-strong: #355d80;
+  --danger: #c96a6a;
+  --danger-strong: #9f4d4d;
+  --border: rgba(28, 39, 51, 0.12);
+  --shadow: 0 24px 60px rgba(53, 93, 128, 0.14);
   --radius: 22px;
 }
 
@@ -26,9 +26,9 @@ body {
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(255, 240, 192, 0.9), transparent 32%),
-    radial-gradient(circle at right center, rgba(20, 108, 89, 0.14), transparent 26%),
-    linear-gradient(145deg, #efe2c0 0%, #f8f3e8 44%, #ece0bf 100%);
+    radial-gradient(circle at top left, rgba(184, 213, 238, 0.55), transparent 30%),
+    radial-gradient(circle at right center, rgba(120, 162, 201, 0.18), transparent 24%),
+    linear-gradient(145deg, #edf4fb 0%, #f7fbff 46%, #dde9f5 100%);
   color: var(--ink);
   font-family: "Avenir Next", "Trebuchet MS", "Gill Sans", sans-serif;
 }

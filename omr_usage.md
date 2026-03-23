@@ -35,7 +35,9 @@ Generated sheets are:
 - A4 portrait
 - marker-based for registration
 - 5-digit student ID
-- question columns with at most `10` questions per column
+- 4 answer columns per page
+- question columns with at most `13` questions per column
+- up to `50` questions per page
 - `2` to `5` answer options per question
 - QR-backed with `examSetId` and `variantId`
 
@@ -85,7 +87,8 @@ Rules:
 
 - each question count must be between `2` and `5`
 - questions are numbered from `1`
-- each question column holds at most `10` rows
+- each question column holds at most `13` rows
+- each page holds at most `50` questions
 - extra questions spill onto new pages
 - the final sheet does not include page numbering
 
@@ -210,6 +213,11 @@ Fields:
 - `marked_answers: dict[str, list[str]]`
 - `omr_error: str`
 
+Notes:
+
+- grading raises an OMR error if any student ID column is empty or has multiple marked digits
+- the default A4 layout uses 4 columns and 13 rows per column, capped at 50 questions per page
+
 ### Grade a Directory
 
 ```python
@@ -235,6 +243,7 @@ Batch grading behavior:
 - only `.pdf` files are processed
 - failures do not abort the batch
 - failed files still return one result entry
+- empty or multiply marked student ID columns are reported through `omr_error`
 - failed entries use:
   - `qr_data = None`
   - `student_id = ""`
@@ -443,6 +452,7 @@ uv run omr-annotate scans/ --output reviewed/
 - grading requires the current marker-based sheet format
 - grading reads only the first page of each PDF
 - student ID is fixed to 5 digits
+- student ID columns must have exactly one marked digit each
 - option labels are limited to `A-E`
 - geometric registration is marker-first
 - QR is used for payload extraction, not for primary alignment
