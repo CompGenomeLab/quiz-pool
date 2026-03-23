@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exam Grading</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div id="grading-busy-overlay" class="busy-overlay hidden" aria-live="polite" aria-busy="true">
+      <div class="busy-overlay__card">
+        <div class="busy-overlay__spinner" aria-hidden="true"></div>
+        <h2 id="grading-busy-title">Working</h2>
+        <p id="grading-busy-copy" class="helper-copy">Please wait while the OMR process completes.</p>
+      </div>
+    </div>
+    <div class="page-shell">
+      <header class="panel masthead">
+        <div class="masthead__copy">
+          <p class="eyebrow">Quiz Pool</p>
+          <h1>Grading</h1>
+          <p class="sidebar__copy">
+            Run <code>omr-grade</code> against a local PDF or directory, then validate each graded result against the
+            stored exam variants.
+          </p>
+        </div>
+        <nav class="page-links">
+          <a class="page-link" href="/">Welcome</a>
+          <a class="page-link" href="/index.html">Editor</a>
+          <a class="page-link" href="/generator.html">Exam Generator</a>
+          <a class="page-link" href="/viewer.html">Exam Viewer</a>
+          <a class="page-link is-active" href="/grading.html">Grading</a>
+        </nav>
+      </header>
+
+      <div class="generator-layout">
+        <aside class="panel generator-controls">
+          <div>
+            <p class="eyebrow">Inputs</p>
+            <h2>Scan Source</h2>
+            <p class="helper-copy">
+              Enter a local PDF path or a local directory path containing filled OMR sheet PDFs on this machine.
+            </p>
+          </div>
+
+          <div class="status-card">
+            <p class="status-card__label">Quiz Database</p>
+            <p id="db-path" class="status-card__value"></p>
+            <p class="status-card__label">Exam Store</p>
+            <p id="exam-store-path" class="status-card__value"></p>
+            <p id="grading-status" class="status-card__hint">Loading grading tools...</p>
+          </div>
+
+          <div class="stack">
+            <label class="field field--full">
+              <span>PDF Or Directory Path</span>
+              <input id="grading-input-path" type="text" placeholder="/absolute/path/to/scans or /path/file.pdf" />
+            </label>
+          </div>
+
+          <div class="sidebar__actions">
+            <button id="run-grading" class="button button--primary" type="button">Run Grading</button>
+          </div>
+        </aside>
+
+        <main class="generator-main">
+          <section id="grading-errors" class="panel panel--error hidden">
+            <div class="panel__subhead">
+              <h3>Grading Errors</h3>
+              <p>Fix these issues before the grading run can complete.</p>
+            </div>
+            <ul id="grading-error-list" class="error-list"></ul>
+          </section>
+
+          <section id="grading-results" class="results-stack hidden">
+            <section class="panel">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Run Summary</p>
+                  <h2 id="grading-heading">Grading Results</h2>
+                </div>
+                <div class="panel__actions">
+                  <button id="annotate-graded-pdfs" class="button button--ghost" type="button" disabled>OMR Annotate</button>
+                </div>
+              </div>
+              <div class="result-summary">
+                <div class="metric">
+                  <span class="metric__label">Input Path</span>
+                  <span id="grading-result-path" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Processed PDFs</span>
+                  <span id="grading-processed-count" class="metric__value">0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Known Student IDs</span>
+                  <span id="grading-known-count" class="metric__value">0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Duplicate Student IDs</span>
+                  <span id="grading-duplicate-count" class="metric__value">0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">OMR Errors</span>
+                  <span id="grading-omr-error-count" class="metric__value">0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Rows With Mismatches</span>
+                  <span id="grading-mismatch-count" class="metric__value">0</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Student Rows</p>
+                  <h2>Per-Student Summary</h2>
+                </div>
+                <div class="panel__actions">
+                  <button id="export-grading-csv" class="button button--ghost" type="button" disabled>Export CSV</button>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="pool-table grading-table">
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Student ID</th>
+                      <th>Source PDF</th>
+                      <th>Exam Set</th>
+                      <th>Variant</th>
+                      <th>Questions</th>
+                      <th>Score</th>
+                      <th>
+                        <button id="sort-correct" class="table-sort-button" type="button" aria-label="Sort by correct answers">
+                          Correct
+                        </button>
+                      </th>
+                      <th>Blank</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="grading-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Detail</p>
+                  <h2>Question-Level Review</h2>
+                </div>
+              </div>
+              <div id="grading-detail-list" class="grading-detail-list"></div>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/grading.js"></script>
+  </body>
+</html>

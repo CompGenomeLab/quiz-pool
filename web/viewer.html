@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Exam Viewer</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="panel masthead">
+        <div class="masthead__copy">
+          <p class="eyebrow">Quiz Pool</p>
+          <h1>Exam Viewer</h1>
+          <p class="sidebar__copy">
+            Browse generated exam sets from the exam-store database, inspect question pools, and review every student
+            variant with its QR code and displayed choices.
+          </p>
+        </div>
+        <nav class="page-links">
+          <a class="page-link" href="/">Welcome</a>
+          <a class="page-link" href="/index.html">Editor</a>
+          <a class="page-link" href="/generator.html">Exam Generator</a>
+          <a class="page-link is-active" href="/viewer.html">Exam Viewer</a>
+          <a class="page-link" href="/grading.html">Grading</a>
+        </nav>
+      </header>
+
+      <div class="generator-layout">
+        <aside class="panel generator-controls">
+          <div>
+            <p class="eyebrow">Saved Runs</p>
+            <h2>Exam Sets</h2>
+            <p class="helper-copy">Select a generated exam set from the exam store.</p>
+          </div>
+
+          <div class="status-card">
+            <p class="status-card__label">Exam Store</p>
+            <p id="exam-store-path" class="status-card__value"></p>
+            <p id="viewer-status" class="status-card__hint">Loading exam sets...</p>
+          </div>
+
+          <label class="field field--full">
+            <span>Exam Set</span>
+            <select id="exam-set-select"></select>
+          </label>
+
+          <div id="exam-set-list" class="viewer-set-list"></div>
+        </aside>
+
+        <main class="generator-main">
+          <section id="viewer-errors" class="panel panel--error hidden">
+            <div class="panel__subhead">
+              <h3>Viewer Errors</h3>
+              <p>Review these issues before loading an exam set.</p>
+            </div>
+            <ul id="viewer-error-list" class="error-list"></ul>
+          </section>
+
+          <div id="viewer-results" class="results-stack hidden">
+            <section class="panel">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Exam Set</p>
+                  <h2 id="viewer-heading">Saved Exam Set</h2>
+                </div>
+                <div class="panel__actions">
+                  <button id="viewer-print-results" class="button button--ghost" type="button" disabled>Download Print ZIP</button>
+                </div>
+              </div>
+              <div class="result-summary">
+                <div class="metric">
+                  <span class="metric__label">Exam Set ID</span>
+                  <span id="viewer-exam-set-id" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Generated At</span>
+                  <span id="viewer-generated-at" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Exam Name</span>
+                  <span id="viewer-exam-name" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Variants</span>
+                  <span id="viewer-variant-count" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Selected Questions</span>
+                  <span id="viewer-question-count" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Source Quiz</span>
+                  <span id="viewer-quiz-title" class="metric__value"></span>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Question Pool</p>
+                  <h2>Shared Source Questions</h2>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="pool-table">
+                  <thead>
+                    <tr>
+                      <th>Source ID</th>
+                      <th>Question</th>
+                      <th>Points</th>
+                      <th>Choices</th>
+                      <th>Correct</th>
+                    </tr>
+                  </thead>
+                  <tbody id="viewer-question-pool-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Variants</p>
+                  <h2>Student Variants</h2>
+                </div>
+              </div>
+              <div class="viewer-variant-controls">
+                <label class="field field--full">
+                  <span>Variant</span>
+                  <select id="viewer-variant-select"></select>
+                </label>
+                <div id="viewer-variant-menu" class="viewer-set-list"></div>
+              </div>
+              <div id="viewer-variant-list" class="variant-stack"></div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/viewer.js"></script>
+  </body>
+</html>

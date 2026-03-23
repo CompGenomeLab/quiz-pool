@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quiz Pool Welcome</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="panel masthead">
+        <div class="masthead__copy">
+          <p class="eyebrow">Quiz Pool</p>
+          <h1>Welcome</h1>
+          <p class="sidebar__copy">
+            Choose the active quiz database JSON and exam database JSON for this server session, then continue into
+            the editor, generator, viewer, or grading tools.
+          </p>
+        </div>
+        <nav class="page-links">
+          <a class="page-link is-active" href="/">Welcome</a>
+          <a class="page-link" href="/index.html">Editor</a>
+          <a class="page-link" href="/generator.html">Exam Generator</a>
+          <a class="page-link" href="/viewer.html">Exam Viewer</a>
+          <a class="page-link" href="/grading.html">Grading</a>
+        </nav>
+      </header>
+
+      <div class="generator-layout">
+        <aside class="panel generator-controls">
+          <div>
+            <p class="eyebrow">Session</p>
+            <h2>Active Paths</h2>
+            <p class="helper-copy">
+              These paths apply to the running server session. Defaults are shown below for quick reset.
+            </p>
+          </div>
+
+          <div class="status-card">
+            <p class="status-card__label">Schema</p>
+            <p id="welcome-schema-path" class="status-card__value"></p>
+            <p class="status-card__label">Status</p>
+            <p id="welcome-status" class="status-card__hint">Loading current paths...</p>
+          </div>
+
+          <div class="stack">
+            <label class="field field--full">
+              <span>Quiz DB JSON</span>
+              <input id="welcome-db-path" type="text" placeholder="/absolute/path/to/quiz.json" />
+            </label>
+            <label class="field field--full">
+              <span>Exam DB JSON</span>
+              <input id="welcome-exam-store-path" type="text" placeholder="/absolute/path/to/generated_exams.json" />
+            </label>
+          </div>
+
+          <div class="sidebar__actions">
+            <button id="welcome-use-defaults" class="button button--ghost" type="button">Use Defaults</button>
+            <button id="welcome-apply-paths" class="button button--primary" type="button">Apply Paths</button>
+          </div>
+        </aside>
+
+        <main class="generator-main">
+          <section id="welcome-errors" class="panel panel--error hidden">
+            <div class="panel__subhead">
+              <h3>Path Errors</h3>
+              <p>Fix these issues before continuing.</p>
+            </div>
+            <ul id="welcome-error-list" class="error-list"></ul>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <div>
+                <p class="eyebrow">Defaults</p>
+                <h2>Suggested Starting Files</h2>
+              </div>
+            </div>
+            <div class="result-summary">
+              <div class="metric">
+                <span class="metric__label">Default Quiz DB</span>
+                <span id="welcome-default-db-path" class="metric__value"></span>
+              </div>
+              <div class="metric">
+                <span class="metric__label">Default Exam DB</span>
+                <span id="welcome-default-exam-store-path" class="metric__value"></span>
+              </div>
+              <div class="metric">
+                <span class="metric__label">Current Quiz DB</span>
+                <span id="welcome-current-db-path" class="metric__value"></span>
+              </div>
+              <div class="metric">
+                <span class="metric__label">Current Exam DB</span>
+                <span id="welcome-current-exam-store-path" class="metric__value"></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__head">
+              <div>
+                <p class="eyebrow">Continue</p>
+                <h2>Open A Tool</h2>
+              </div>
+            </div>
+            <p class="helper-copy">
+              These links use the currently active paths. Apply changes first if you edited either path above.
+            </p>
+            <div class="welcome-links">
+              <a class="question-tile" href="/index.html">
+                <span class="question-tile__id">Editor</span>
+                <span class="question-tile__text">Edit the quiz JSON directly and validate against the schema.</span>
+              </a>
+              <a class="question-tile" href="/generator.html">
+                <span class="question-tile__id">Exam Generator</span>
+                <span class="question-tile__text">Generate saved exam sets and printable student variants.</span>
+              </a>
+              <a class="question-tile" href="/viewer.html">
+                <span class="question-tile__id">Exam Viewer</span>
+                <span class="question-tile__text">Inspect saved exam sets, variants, and QR codes.</span>
+              </a>
+              <a class="question-tile" href="/grading.html">
+                <span class="question-tile__id">Grading</span>
+                <span class="question-tile__text">Run OMR grading and validate scanned sheets against saved variants.</span>
+              </a>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/welcome.js"></script>
+  </body>
+</html>

@@ -16,9 +16,8 @@
     },
     "learningObjectives": {
       "type": "array",
-      "description": "Master list of exactly 6 learning objectives",
-      "minItems": 6,
-      "maxItems": 6,
+      "description": "Master list of one or more learning objectives",
+      "minItems": 1,
       "items": {
         "$ref": "#/$defs/learningObjective"
       }
@@ -39,7 +38,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "enum": ["LO1", "LO2", "LO3", "LO4", "LO5", "LO6"]
+          "pattern": "^LO[1-9][0-9]*$"
         },
         "label": {
           "type": "string"
@@ -57,6 +56,7 @@
         "learningObjectiveIds",
         "correctAnswers",
         "bookLocations",
+        "points",
         "difficulty"
       ],
       "properties": {
@@ -102,7 +102,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "enum": ["LO1", "LO2", "LO3", "LO4", "LO5", "LO6"]
+            "pattern": "^LO[1-9][0-9]*$"
           }
         },
         "correctAnswers": {
@@ -128,6 +128,11 @@
           "minimum": 1,
           "maximum": 5,
           "description": "Difficulty rating from 1 to 5"
+        },
+        "points": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Point value awarded for a correct answer"
         },
         "explanation": {
           "type": "string",

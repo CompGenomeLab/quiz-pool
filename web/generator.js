@@ -1,8 +1,10 @@
 const state = {
+  activePoolQuestionId: "",
   dbPath: "",
   examStorePath: "",
   generatedRun: null,
   quiz: null,
+  statusSortDirection: "default",
   statusIsError: false,
   statusMessage: "Loading quiz data...",
   validationErrors: [],
@@ -17,12 +19,21 @@ const state = {
 };
 
 const DEFAULT_EXAM_RULES = [
-  "Complete the student information block before the exam begins.",
+  "Fully fill the bubbles. Do not leave any student ID column blank.",
   "Read every question carefully and select all correct answers for each question.",
   "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
   "Do not communicate with other students or use unauthorized materials during the exam.",
   "Remain seated until instructed to stop and submit your paper.",
 ];
+const DEFAULT_OMR_INSTRUCTIONS = DEFAULT_EXAM_RULES[0];
+const MAX_QUESTIONS_PER_EXAM = 50;
+
+function defaultExamRules(omrInstructions = DEFAULT_OMR_INSTRUCTIONS) {
+  return [
+    omrInstructions,
+    ...DEFAULT_EXAM_RULES.slice(1),
+  ];
+}
 
 const elements = {
   availableCount: document.querySelector("#available-count"),
@@ -32,6 +43,7 @@ const elements = {
   difficultyFilters: document.querySelector("#difficulty-filters"),
   examDate: document.querySelector("#exam-date"),
   examName: document.querySelector("#exam-name"),
+  omrInstructions: document.querySelector("#omr-instructions"),
   examRules: document.querySelector("#exam-rules"),
   examStorePath: document.querySelector("#exam-store-path"),
   errorList: document.querySelector("#generator-error-list"),
@@ -45,6 +57,11 @@ const elements = {
   institutionName: document.querySelector("#institution-name"),
   objectiveFilters: document.querySelector("#objective-filters"),
   poolTableBody: document.querySelector("#pool-table-body"),
+  poolQuestionBackdrop: document.querySelector("#pool-question-backdrop"),
+  poolQuestionDetail: document.querySelector("#pool-question-detail"),
+  poolQuestionEditLink: document.querySelector("#pool-question-edit-link"),
+  poolQuestionModal: document.querySelector("#pool-question-modal"),
+  poolQuestionTitle: document.querySelector("#pool-question-title"),
   printResults: document.querySelector("#print-results"),
   questionCount: document.querySelector("#question-count"),
   resetOverrides: document.querySelector("#reset-overrides"),
@@ -57,6 +74,8 @@ const elements = {
   resultSelectedCount: document.querySelector("#result-selected-count"),
   resultVariantCount: document.querySelector("#result-variant-count"),
   results: document.querySelector("#generation-results"),
+  closePoolQuestion: document.querySelector("#close-pool-question"),
+  sortStatus: document.querySelector("#sort-status"),
   startTime: document.querySelector("#start-time"),
   teacherSummaryBody: document.querySelector("#teacher-summary-body"),
   totalTimeMinutes: document.querySelector("#total-time-minutes"),
@@ -74,6 +93,7 @@ function printableMetadata() {
     examDate: elements.examDate.value.trim(),
     startTime: elements.startTime.value.trim(),
     totalTimeMinutes: Number.isFinite(parsedTotalTime) ? parsedTotalTime : null,
+    omrInstructions: elements.omrInstructions.value.trim(),
     examRules: parseExamRules(elements.examRules.value),
   };
 }
@@ -91,6 +111,7 @@ function runPrintSettings(run) {
     examDate: normalizeTextValue(settings.examDate, "—"),
     startTime: normalizeTextValue(settings.startTime, "—"),
     totalTimeMinutes: String(settings.totalTimeMinutes ?? "").trim() || "—",
+    omrInstructions: normalizeTextValue(settings.omrInstructions, DEFAULT_OMR_INSTRUCTIONS),
     examRules: normalizeExamRules(settings.examRules),
   };
 }
@@ -147,7 +168,7 @@ function normalizeExamRules(value) {
       return rules;
     }
   }
-  return [...DEFAULT_EXAM_RULES];
+  return defaultExamRules();
 }
 
 function questionChapters(question) {
@@ -238,6 +259,32 @@ function rowStatus(question) {
     return { label: "Eligible", tone: "eligible" };
   }
   return { label: "Filtered Out", tone: "filtered" };
+}
+
+function statusSortRank(tone) {
+  if (state.statusSortDirection === "default") {
+    return {
+      eligible: 0,
+      include: 1,
+      filtered: 2,
+      exclude: 3,
+    }[tone] ?? 99;
+  }
+  return {
+    exclude: 0,
+    filtered: 1,
+    include: 2,
+    eligible: 3,
+  }[tone] ?? 99;
+}
+
+function updateStatusSortButton() {
+  const label = state.statusSortDirection === "default" ? "Status ↓" : "Status ↑";
+  const ariaLabel = state.statusSortDirection === "default"
+    ? "Sort by status category, eligible first"
+    : "Sort by status category, excluded first";
+  elements.sortStatus.textContent = label;
+  elements.sortStatus.setAttribute("aria-label", ariaLabel);
 }
 
 function updateSummary() {
@@ -332,9 +379,20 @@ function renderFilterGroups() {
 
 function renderPoolTable() {
   const fragment = document.createDocumentFragment();
+  updateStatusSortButton();
+  const sortedQuestions = [...state.quiz.questions].sort((left, right) => {
+    const leftStatus = rowStatus(left);
+    const rightStatus = rowStatus(right);
+    const rankDelta = statusSortRank(leftStatus.tone) - statusSortRank(rightStatus.tone);
+    if (rankDelta !== 0) {
+      return rankDelta;
+    }
+    return String(left.id).localeCompare(String(right.id));
+  });
 
-  for (const question of state.quiz.questions) {
+  for (const question of sortedQuestions) {
     const row = document.createElement("tr");
+    row.className = "pool-table__row";
     const status = rowStatus(question);
 
     const questionId = document.createElement("td");
@@ -353,6 +411,9 @@ function renderPoolTable() {
 
     const difficulty = document.createElement("td");
     difficulty.textContent = String(question.difficulty);
+
+    const points = document.createElement("td");
+    points.textContent = String(question.points ?? 1);
 
     const objectives = document.createElement("td");
     objectives.className = "cell-copy";
@@ -392,13 +453,107 @@ function renderPoolTable() {
       }
       renderPoolState();
     });
+    select.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
     overrideCell.append(select);
 
-    row.append(questionId, prompt, chapters, difficulty, objectives, shuffleChoices, statusCell, overrideCell);
+    row.addEventListener("click", () => {
+      state.activePoolQuestionId = question.id;
+      renderPoolQuestionModal();
+    });
+
+    row.append(questionId, prompt, chapters, difficulty, points, objectives, shuffleChoices, statusCell, overrideCell);
     fragment.append(row);
   }
 
   elements.poolTableBody.replaceChildren(fragment);
+}
+
+function getActivePoolQuestion() {
+  return state.quiz?.questions?.find((question) => question.id === state.activePoolQuestionId) ?? null;
+}
+
+function closePoolQuestionModal() {
+  state.activePoolQuestionId = "";
+  renderPoolQuestionModal();
+}
+
+function renderPoolQuestionModal() {
+  const question = getActivePoolQuestion();
+  const isOpen = Boolean(question);
+  elements.poolQuestionModal.classList.toggle("is-open", isOpen);
+  elements.poolQuestionModal.setAttribute("aria-hidden", String(!isOpen));
+  document.body.style.overflow = isOpen ? "hidden" : "";
+  if (!question) {
+    elements.poolQuestionTitle.textContent = "Selected Question";
+    elements.poolQuestionDetail.replaceChildren();
+    elements.poolQuestionEditLink.href = "/index.html";
+    return;
+  }
+
+  const status = rowStatus(question);
+  elements.poolQuestionTitle.textContent = `${question.id} · ${question.points ?? 1} pt`;
+  elements.poolQuestionEditLink.href = `/index.html?questionId=${encodeURIComponent(question.id)}`;
+
+  const chapters = questionChapters(question).join(", ") || "—";
+  const objectives = question.learningObjectiveIds
+    .map((objectiveId) => `${objectiveId} · ${objectiveLabel(objectiveId)}`)
+    .join(", ") || "—";
+  const choicesMarkup = question.choices.map((choice) => {
+    const isCorrect = question.correctAnswers.includes(choice.key);
+    return `<li><span class="choice-pill">${escapeHtml(choice.key)}. ${escapeHtml(choice.text)}${isCorrect ? " · Correct" : ""}</span></li>`;
+  }).join("");
+  const referencesMarkup = (question.bookLocations ?? []).map((location) => `
+    <tr>
+      <td>${escapeHtml(location.chapter ?? "—")}</td>
+      <td>${escapeHtml(location.section ?? "—")}</td>
+      <td>${escapeHtml(String(location.page ?? "—"))}</td>
+      <td class="cell-copy">${escapeHtml(location.reference ?? "—")}</td>
+    </tr>
+  `).join("");
+
+  elements.poolQuestionDetail.innerHTML = `
+    <div class="question-detail-sheet__meta">
+      <div class="metric"><span class="metric__label">Status</span><span class="metric__value"><span class="status-badge status-badge--${status.tone}">${escapeHtml(status.label)}</span></span></div>
+      <div class="metric"><span class="metric__label">Difficulty</span><span class="metric__value">${question.difficulty}</span></div>
+      <div class="metric"><span class="metric__label">Points</span><span class="metric__value">${question.points ?? 1}</span></div>
+      <div class="metric"><span class="metric__label">Shuffle Choices</span><span class="metric__value">${question.shuffleChoices ? "Yes" : "No"}</span></div>
+    </div>
+    <section class="question-detail-sheet__block">
+      <h3>Prompt</h3>
+      <p class="question-detail-sheet__copy">${escapeHtml(question.question)}</p>
+    </section>
+    <section class="question-detail-sheet__block">
+      <h3>Coverage</h3>
+      <p class="question-detail-sheet__copy"><strong>Chapters:</strong> ${escapeHtml(chapters)}</p>
+      <p class="question-detail-sheet__copy"><strong>Learning Objectives:</strong> ${escapeHtml(objectives)}</p>
+    </section>
+    <section class="question-detail-sheet__block">
+      <h3>Choices</h3>
+      <ul class="choice-list">${choicesMarkup}</ul>
+    </section>
+    <section class="question-detail-sheet__block">
+      <h3>Explanation</h3>
+      <p class="question-detail-sheet__copy">${escapeHtml(question.explanation || "—")}</p>
+    </section>
+    <section class="question-detail-sheet__block">
+      <h3>Book Locations</h3>
+      <div class="table-wrap">
+        <table class="pool-table">
+          <thead>
+            <tr>
+              <th>Chapter</th>
+              <th>Section</th>
+              <th>Page</th>
+              <th>Reference</th>
+            </tr>
+          </thead>
+          <tbody>${referencesMarkup || '<tr><td colspan="4">No references listed.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
 }
 
 function renderPoolState() {
@@ -441,6 +596,7 @@ function renderGeneratedRun() {
         variant.variantId,
         String(question.position),
         question.sourceQuestionId,
+        String(question.points ?? 1),
         question.displayCorrectAnswers.join(", "),
         question.sourceCorrectAnswers.join(", "),
       ]) {
@@ -475,6 +631,7 @@ function renderGeneratedRun() {
     if (printSettings.examDate !== "—") metaParts.push(printSettings.examDate);
     if (printSettings.startTime !== "—") metaParts.push(printSettings.startTime);
     if (printSettings.totalTimeMinutes !== "—") metaParts.push(`${printSettings.totalTimeMinutes} min`);
+    metaParts.push(`${variant.questions.reduce((total, question) => total + Number(question.points ?? 1), 0)} pts`);
     meta.textContent = metaParts.join(" · ") || "Generated from the current quiz pool.";
     headingBlock.append(eyebrow, title, meta);
 
@@ -516,6 +673,7 @@ function renderGeneratedRun() {
         <div class="variant-card__fact"><span>Start Time</span><strong>${escapeHtml(printSettings.startTime)}</strong></div>
         <div class="variant-card__fact"><span>Total Time in Minutes</span><strong>${escapeHtml(printSettings.totalTimeMinutes)}</strong></div>
         <div class="variant-card__fact"><span>Number of Questions</span><strong>${variant.questions.length}</strong></div>
+        <div class="variant-card__fact"><span>Total Points</span><strong>${variant.questions.reduce((total, question) => total + Number(question.points ?? 1), 0)}</strong></div>
         <div class="variant-card__fact"><span>Number of Pages</span><strong>${variantPageCount(variant)}</strong></div>
       </div>
     `;
@@ -542,7 +700,7 @@ function renderGeneratedRun() {
 
       const questionHead = document.createElement("div");
       questionHead.className = "question-preview__head";
-      questionHead.textContent = `Question ${question.position}`;
+      questionHead.textContent = `Question ${question.position} · ${question.points ?? 1} pt`;
 
       const title = document.createElement("p");
       title.className = "question-preview__title";
@@ -580,12 +738,18 @@ async function loadQuiz() {
   state.dbPath = payload.dbPath;
   state.examStorePath = payload.examStorePath;
   state.selection.questionCount = Math.max(1, Math.min(10, state.quiz.questions.length));
+  state.selection.questionCount = Math.min(state.selection.questionCount, MAX_QUESTIONS_PER_EXAM);
   state.selection.variantCount = 1;
   if (!elements.examName.value.trim()) {
     elements.examName.value = state.quiz.title ?? "";
   }
+  if (!elements.omrInstructions.value.trim()) {
+    elements.omrInstructions.value = DEFAULT_OMR_INSTRUCTIONS;
+  }
   if (!elements.examRules.value.trim()) {
-    elements.examRules.value = DEFAULT_EXAM_RULES.join("\n");
+    elements.examRules.value = defaultExamRules(
+      elements.omrInstructions.value.trim() || DEFAULT_OMR_INSTRUCTIONS,
+    ).join("\n");
   }
   elements.dbPath.textContent = state.dbPath;
   elements.examStorePath.textContent = state.examStorePath;
@@ -600,6 +764,18 @@ async function generateExams() {
   state.validationErrors = [];
   renderErrors();
   setStatus("Generating variants...");
+
+  if (Number.parseInt(elements.questionCount.value, 10) > MAX_QUESTIONS_PER_EXAM) {
+    state.validationErrors = [
+      {
+        path: "questionCount",
+        message: `Questions per exam cannot be greater than ${MAX_QUESTIONS_PER_EXAM}.`,
+      },
+    ];
+    renderErrors();
+    setStatus(`Questions per exam cannot be greater than ${MAX_QUESTIONS_PER_EXAM}.`, true);
+    return;
+  }
 
   const payload = {
     questionCount: Number.parseInt(elements.questionCount.value, 10),
@@ -678,8 +854,36 @@ async function downloadPrintableZip() {
 }
 
 function wireEvents() {
+  elements.omrInstructions.addEventListener("input", () => {
+    const currentRules = parseExamRules(elements.examRules.value);
+    const omrInstructions = elements.omrInstructions.value.trim() || DEFAULT_OMR_INSTRUCTIONS;
+    if (
+      currentRules.length === 0
+      || JSON.stringify(currentRules) === JSON.stringify(defaultExamRules())
+      || JSON.stringify(currentRules) === JSON.stringify(defaultExamRules(currentRules[0] || DEFAULT_OMR_INSTRUCTIONS))
+    ) {
+      elements.examRules.value = defaultExamRules(omrInstructions).join("\n");
+    }
+  });
+
   elements.questionCount.addEventListener("input", (event) => {
-    state.selection.questionCount = Math.max(1, Number.parseInt(event.target.value || "1", 10));
+    const nextValue = Math.max(1, Number.parseInt(event.target.value || "1", 10));
+    state.selection.questionCount = Math.min(MAX_QUESTIONS_PER_EXAM, nextValue);
+    if (nextValue > MAX_QUESTIONS_PER_EXAM) {
+      state.validationErrors = [
+        {
+          path: "questionCount",
+          message: `Questions per exam cannot be greater than ${MAX_QUESTIONS_PER_EXAM}.`,
+        },
+      ];
+      renderErrors();
+      setStatus(`Questions per exam cannot be greater than ${MAX_QUESTIONS_PER_EXAM}.`, true);
+    } else if (state.validationErrors.some((error) => error.path === "questionCount")) {
+      state.validationErrors = state.validationErrors.filter((error) => error.path !== "questionCount");
+      renderErrors();
+      setStatus("Quiz pool loaded.");
+    }
+    event.target.value = String(state.selection.questionCount);
   });
 
   elements.variantCount.addEventListener("input", (event) => {
@@ -702,6 +906,25 @@ function wireEvents() {
     state.selection.overrides = {};
     renderPoolState();
     setStatus("Question overrides reset.");
+  });
+
+  elements.sortStatus.addEventListener("click", () => {
+    state.statusSortDirection = state.statusSortDirection === "default" ? "reverse" : "default";
+    renderPoolTable();
+  });
+
+  elements.closePoolQuestion.addEventListener("click", () => {
+    closePoolQuestionModal();
+  });
+
+  elements.poolQuestionBackdrop.addEventListener("click", () => {
+    closePoolQuestionModal();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.activePoolQuestionId) {
+      closePoolQuestionModal();
+    }
   });
 }
 

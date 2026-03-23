@@ -58,6 +58,7 @@
           "reference": "Overview table of major capitals in Asia."
         }
       ],
+      "points": 1,
       "difficulty": 1,
       "explanation": "Tokyo is the capital of Japan."
     },
@@ -103,6 +104,7 @@
           "reference": "Planet size comparison diagram."
         }
       ],
+      "points": 2,
       "difficulty": 1,
       "explanation": "Jupiter is the largest planet in the solar system."
     },
@@ -148,8 +150,1763 @@
           "reference": "Map comparing the major oceans."
         }
       ],
+      "points": 3,
       "difficulty": 1,
       "explanation": "The Pacific Ocean is the largest ocean on Earth."
+    },
+    {
+      "id": "Q4",
+      "question": "What is the capital of France?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Paris"
+        },
+        {
+          "key": "B",
+          "text": "Rome"
+        },
+        {
+          "key": "C",
+          "text": "Madrid"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 1",
+          "section": "Europe",
+          "page": "6",
+          "reference": "European capitals list."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Paris is the capital of France."
+    },
+    {
+      "id": "Q5",
+      "question": "Which planet is known as the Red Planet?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Mars"
+        },
+        {
+          "key": "B",
+          "text": "Venus"
+        },
+        {
+          "key": "C",
+          "text": "Mercury"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 2",
+          "section": "Planets",
+          "page": "14",
+          "reference": "Planet colors."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Mars appears red due to iron oxide."
+    },
+    {
+      "id": "Q6",
+      "question": "Which continent is the Sahara Desert located in?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Asia"
+        },
+        {
+          "key": "B",
+          "text": "Africa"
+        },
+        {
+          "key": "C",
+          "text": "Australia"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 1",
+          "section": "Deserts",
+          "page": "10",
+          "reference": "Major deserts."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The Sahara Desert is in Africa."
+    },
+    {
+      "id": "Q7",
+      "question": "What is Earth's natural satellite?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Mars"
+        },
+        {
+          "key": "B",
+          "text": "Moon"
+        },
+        {
+          "key": "C",
+          "text": "Sun"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 2",
+          "section": "Moon",
+          "page": "16",
+          "reference": "Earth's satellite."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The Moon orbits Earth."
+    },
+    {
+      "id": "Q8",
+      "question": "Which country is known for the Great Wall?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "China"
+        },
+        {
+          "key": "B",
+          "text": "India"
+        },
+        {
+          "key": "C",
+          "text": "Japan"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 1",
+          "section": "Landmarks",
+          "page": "18",
+          "reference": "Famous landmarks."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The Great Wall is in China."
+    },
+    {
+      "id": "Q9",
+      "question": "Which gas do plants absorb from the atmosphere?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Oxygen"
+        },
+        {
+          "key": "B",
+          "text": "Carbon Dioxide"
+        },
+        {
+          "key": "C",
+          "text": "Nitrogen"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO3"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 3",
+          "section": "Plants",
+          "page": "22",
+          "reference": "Photosynthesis."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "Plants use carbon dioxide in photosynthesis."
+    },
+    {
+      "id": "Q10",
+      "question": "Which is the smallest continent?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Australia"
+        },
+        {
+          "key": "B",
+          "text": "Europe"
+        },
+        {
+          "key": "C",
+          "text": "Antarctica"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 1",
+          "section": "Continents",
+          "page": "11",
+          "reference": "Size comparison."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "Australia is the smallest continent."
+    },
+    {
+      "id": "Q11",
+      "question": "What is the boiling point of water?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "100°C"
+        },
+        {
+          "key": "B",
+          "text": "0°C"
+        },
+        {
+          "key": "C",
+          "text": "50°C"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO3"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 4",
+          "section": "Water",
+          "page": "25",
+          "reference": "States of matter."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Water boils at 100°C."
+    },
+    {
+      "id": "Q12",
+      "question": "Which animal is known as the King of the Jungle?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Lion"
+        },
+        {
+          "key": "B",
+          "text": "Tiger"
+        },
+        {
+          "key": "C",
+          "text": "Elephant"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO6"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 5",
+          "section": "Animals",
+          "page": "30",
+          "reference": "Animal titles."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Lion is often called king of the jungle."
+    },
+    {
+      "id": "Q13",
+      "question": "Which is the longest river in the world?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Nile"
+        },
+        {
+          "key": "B",
+          "text": "Amazon"
+        },
+        {
+          "key": "C",
+          "text": "Yangtze"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 1",
+          "section": "Rivers",
+          "page": "12",
+          "reference": "River lengths."
+        }
+      ],
+      "points": 2,
+      "difficulty": 2,
+      "explanation": "The Nile is traditionally considered the longest river."
+    },
+    {
+      "id": "Q14",
+      "question": "Which planet is closest to the Sun?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Mercury"
+        },
+        {
+          "key": "B",
+          "text": "Venus"
+        },
+        {
+          "key": "C",
+          "text": "Earth"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 2",
+          "section": "Planets",
+          "page": "13",
+          "reference": "Orbit order."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Mercury is closest to the Sun."
+    },
+    {
+      "id": "Q15",
+      "question": "What is the largest mammal?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Elephant"
+        },
+        {
+          "key": "B",
+          "text": "Blue Whale"
+        },
+        {
+          "key": "C",
+          "text": "Giraffe"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO6"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 5",
+          "section": "Marine Life",
+          "page": "32",
+          "reference": "Largest animals."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "The blue whale is the largest mammal."
+    },
+    {
+      "id": "Q16",
+      "question": "Which country invented pizza?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Italy"
+        },
+        {
+          "key": "B",
+          "text": "France"
+        },
+        {
+          "key": "C",
+          "text": "USA"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO5"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 6",
+          "section": "Food",
+          "page": "40",
+          "reference": "Origins of dishes."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Pizza originated in Italy."
+    },
+    {
+      "id": "Q17",
+      "question": "Which element has the symbol O?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Oxygen"
+        },
+        {
+          "key": "B",
+          "text": "Gold"
+        },
+        {
+          "key": "C",
+          "text": "Osmium"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO3"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 7",
+          "section": "Elements",
+          "page": "45",
+          "reference": "Periodic table."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "O is the symbol for oxygen."
+    },
+    {
+      "id": "Q18",
+      "question": "Which is the tallest mountain in the world?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Everest"
+        },
+        {
+          "key": "B",
+          "text": "K2"
+        },
+        {
+          "key": "C",
+          "text": "Kilimanjaro"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 1",
+          "section": "Mountains",
+          "page": "15",
+          "reference": "Highest peaks."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "Mount Everest is the tallest."
+    },
+    {
+      "id": "Q19",
+      "question": "What do bees produce?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Milk"
+        },
+        {
+          "key": "B",
+          "text": "Honey"
+        },
+        {
+          "key": "C",
+          "text": "Silk"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO6"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 5",
+          "section": "Insects",
+          "page": "35",
+          "reference": "Bee products."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Bees produce honey."
+    },
+    {
+      "id": "Q20",
+      "question": "Which instrument has keys, pedals, and strings?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Guitar"
+        },
+        {
+          "key": "B",
+          "text": "Piano"
+        },
+        {
+          "key": "C",
+          "text": "Drum"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO6"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 8",
+          "section": "Music",
+          "page": "50",
+          "reference": "Instruments."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "A piano has keys, pedals, and strings."
+    },
+    {
+      "id": "Q21",
+      "question": "Which is the fastest land animal?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Cheetah"
+        },
+        {
+          "key": "B",
+          "text": "Lion"
+        },
+        {
+          "key": "C",
+          "text": "Horse"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO6"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 5",
+          "section": "Animals",
+          "page": "36",
+          "reference": "Speed comparison."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "The cheetah is the fastest land animal."
+    },
+    {
+      "id": "Q22",
+      "question": "How many continents are there?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "5"
+        },
+        {
+          "key": "B",
+          "text": "6"
+        },
+        {
+          "key": "C",
+          "text": "7"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1"
+      ],
+      "correctAnswers": [
+        "C"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 1",
+          "section": "Continents",
+          "page": "9",
+          "reference": "World map."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "There are 7 continents."
+    },
+    {
+      "id": "Q23",
+      "question": "What is the primary source of energy for Earth?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Moon"
+        },
+        {
+          "key": "B",
+          "text": "Sun"
+        },
+        {
+          "key": "C",
+          "text": "Wind"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Ch 2",
+          "section": "Sun",
+          "page": "17",
+          "reference": "Solar energy."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The Sun provides Earth's energy."
+    },
+    {
+      "id": "Q24",
+      "question": "Which country is shaped like a boot?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Italy"
+        },
+        {
+          "key": "B",
+          "text": "Greece"
+        },
+        {
+          "key": "C",
+          "text": "Portugal"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO4"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Country Shapes",
+          "page": "19",
+          "reference": "Map silhouettes of European countries."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Italy is commonly described as being shaped like a boot."
+    },
+    {
+      "id": "Q25",
+      "question": "Which planet is famous for its prominent rings?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Saturn"
+        },
+        {
+          "key": "B",
+          "text": "Neptune"
+        },
+        {
+          "key": "C",
+          "text": "Mars"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO6"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Outer Planets",
+          "page": "21",
+          "reference": "Illustration of planetary ring systems."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Saturn is best known for its large and visible ring system."
+    },
+    {
+      "id": "Q26",
+      "question": "Which line divides Earth into the Northern and Southern Hemispheres?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Prime Meridian"
+        },
+        {
+          "key": "B",
+          "text": "Equator"
+        },
+        {
+          "key": "C",
+          "text": "Tropic of Cancer"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO3"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Latitude and Longitude",
+          "page": "13-14",
+          "reference": "Diagram of major imaginary lines on Earth."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "The Equator divides Earth into the Northern and Southern Hemispheres."
+    },
+    {
+      "id": "Q27",
+      "question": "What is the name of the galaxy that contains our solar system?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Andromeda Galaxy"
+        },
+        {
+          "key": "B",
+          "text": "Milky Way"
+        },
+        {
+          "key": "C",
+          "text": "Whirlpool Galaxy"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO5"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Galaxies",
+          "page": "26",
+          "reference": "Overview of nearby and major galaxies."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "Our solar system is located in the Milky Way galaxy."
+    },
+    {
+      "id": "Q28",
+      "question": "Which country has Cairo as its capital?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Morocco"
+        },
+        {
+          "key": "B",
+          "text": "Egypt"
+        },
+        {
+          "key": "C",
+          "text": "Jordan"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO3"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "African Capitals",
+          "page": "7",
+          "reference": "Capital cities in North Africa."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Cairo is the capital of Egypt."
+    },
+    {
+      "id": "Q29",
+      "question": "Which celestial body do Earth and the other planets orbit?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "The Moon"
+        },
+        {
+          "key": "B",
+          "text": "The Sun"
+        },
+        {
+          "key": "C",
+          "text": "Polaris"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO4"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Solar System Basics",
+          "page": "10",
+          "reference": "Central star and planetary orbits."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The planets in our solar system orbit the Sun."
+    },
+    {
+      "id": "Q30",
+      "question": "Which is the largest continent by land area?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Africa"
+        },
+        {
+          "key": "B",
+          "text": "Asia"
+        },
+        {
+          "key": "C",
+          "text": "North America"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO6"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Continents",
+          "page": "9-10",
+          "reference": "Area comparison of continents."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Asia is the largest continent by land area."
+    },
+    {
+      "id": "Q31",
+      "question": "Which planet is sometimes called Earth's sister planet because of its similar size?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Venus"
+        },
+        {
+          "key": "B",
+          "text": "Mars"
+        },
+        {
+          "key": "C",
+          "text": "Jupiter"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO3"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Inner Planets",
+          "page": "15",
+          "reference": "Comparison of rocky planets."
+        }
+      ],
+      "points": 2,
+      "difficulty": 2,
+      "explanation": "Venus is often called Earth's sister planet because its size is similar to Earth's."
+    },
+    {
+      "id": "Q32",
+      "question": "Which ocean lies between Africa, Asia, and Australia?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Indian Ocean"
+        },
+        {
+          "key": "B",
+          "text": "Atlantic Ocean"
+        },
+        {
+          "key": "C",
+          "text": "Southern Ocean"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO5"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "World Oceans",
+          "page": "8",
+          "reference": "Map of ocean boundaries."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The Indian Ocean lies between Africa, Asia, and Australia."
+    },
+    {
+      "id": "Q33",
+      "question": "What is a shooting star actually called?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Meteor"
+        },
+        {
+          "key": "B",
+          "text": "Comet"
+        },
+        {
+          "key": "C",
+          "text": "Asteroid"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO3",
+        "LO4"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Small Bodies in Space",
+          "page": "29",
+          "reference": "Definitions of meteors, comets, and asteroids."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "A shooting star is the visible streak of a meteor burning in Earth's atmosphere."
+    },
+    {
+      "id": "Q34",
+      "question": "Which country is home to the city of Sydney?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "New Zealand"
+        },
+        {
+          "key": "B",
+          "text": "Australia"
+        },
+        {
+          "key": "C",
+          "text": "Canada"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO6"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Major Cities",
+          "page": "17",
+          "reference": "Cities of Oceania."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Sydney is one of the best-known cities in Australia."
+    },
+    {
+      "id": "Q35",
+      "question": "Which planet takes about 365 days to orbit the Sun?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Earth"
+        },
+        {
+          "key": "B",
+          "text": "Mars"
+        },
+        {
+          "key": "C",
+          "text": "Venus"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO6"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Planetary Orbits",
+          "page": "18",
+          "reference": "Approximate orbital periods of the planets."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Earth takes about 365 days to complete one orbit around the Sun."
+    },
+    {
+      "id": "Q36",
+      "question": "Which desert is located in northern Africa?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Gobi Desert"
+        },
+        {
+          "key": "B",
+          "text": "Sahara Desert"
+        },
+        {
+          "key": "C",
+          "text": "Atacama Desert"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO4"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Deserts of the World",
+          "page": "11",
+          "reference": "Global desert map."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The Sahara Desert is located in northern Africa."
+    },
+    {
+      "id": "Q37",
+      "question": "Which planet is farthest from the Sun among the eight major planets?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Uranus"
+        },
+        {
+          "key": "B",
+          "text": "Neptune"
+        },
+        {
+          "key": "C",
+          "text": "Saturn"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO3"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Outer Planets",
+          "page": "23",
+          "reference": "Order of planets from the Sun."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "Neptune is the farthest major planet from the Sun."
+    },
+    {
+      "id": "Q38",
+      "question": "Which country has the maple leaf on its national flag?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Canada"
+        },
+        {
+          "key": "B",
+          "text": "Austria"
+        },
+        {
+          "key": "C",
+          "text": "Denmark"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO5"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Flags and Symbols",
+          "page": "22",
+          "reference": "Common national emblems."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Canada's national flag prominently features a maple leaf."
+    },
+    {
+      "id": "Q39",
+      "question": "What is the name of the first person to walk on the Moon?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Buzz Aldrin"
+        },
+        {
+          "key": "B",
+          "text": "Yuri Gagarin"
+        },
+        {
+          "key": "C",
+          "text": "Neil Armstrong"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO5",
+        "LO6"
+      ],
+      "correctAnswers": [
+        "C"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Space Exploration",
+          "page": "31",
+          "reference": "Apollo mission milestones."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "Neil Armstrong was the first person to walk on the Moon."
+    },
+    {
+      "id": "Q40",
+      "question": "Which country is both in Europe and Asia and includes the city of Istanbul?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Turkey"
+        },
+        {
+          "key": "B",
+          "text": "Kazakhstan"
+        },
+        {
+          "key": "C",
+          "text": "Georgia"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO4"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Transcontinental Countries",
+          "page": "24",
+          "reference": "Countries spanning more than one continent."
+        }
+      ],
+      "points": 2,
+      "difficulty": 2,
+      "explanation": "Turkey is a transcontinental country and Istanbul is one of its best-known cities."
+    },
+    {
+      "id": "Q41",
+      "question": "Which object causes tides on Earth mainly through its gravitational pull?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "The Moon"
+        },
+        {
+          "key": "B",
+          "text": "Mars"
+        },
+        {
+          "key": "C",
+          "text": "Venus"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO3"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Earth and Moon",
+          "page": "20",
+          "reference": "Effects of gravity on oceans."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "The Moon's gravitational pull is the main cause of tides on Earth."
+    },
+    {
+      "id": "Q42",
+      "question": "Which South American river is famous for carrying the greatest volume of water?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Amazon River"
+        },
+        {
+          "key": "B",
+          "text": "Paraná River"
+        },
+        {
+          "key": "C",
+          "text": "Orinoco River"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO5"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Major Rivers",
+          "page": "16",
+          "reference": "Comparisons of river length and discharge."
+        }
+      ],
+      "points": 2,
+      "difficulty": 2,
+      "explanation": "The Amazon River is famous for having the greatest water discharge in the world."
+    },
+    {
+      "id": "Q43",
+      "question": "Which planet rotates on its side compared with most other planets?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Uranus"
+        },
+        {
+          "key": "B",
+          "text": "Mercury"
+        },
+        {
+          "key": "C",
+          "text": "Earth"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO6"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Interesting Planet Facts",
+          "page": "24",
+          "reference": "Axial tilt of the planets."
+        }
+      ],
+      "points": 2,
+      "difficulty": 2,
+      "explanation": "Uranus is notable for its extreme axial tilt, making it appear to rotate on its side."
+    },
+    {
+      "id": "Q44",
+      "question": "Which capital city is located on the River Thames?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "London"
+        },
+        {
+          "key": "B",
+          "text": "Dublin"
+        },
+        {
+          "key": "C",
+          "text": "Amsterdam"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO3"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "European Capitals",
+          "page": "6-7",
+          "reference": "Capitals and major rivers."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "London is located on the River Thames."
+    },
+    {
+      "id": "Q45",
+      "question": "What is the term for a rock from space that reaches Earth's surface?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Meteorite"
+        },
+        {
+          "key": "B",
+          "text": "Meteor"
+        },
+        {
+          "key": "C",
+          "text": "Nebula"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO3",
+        "LO4"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Space Rocks",
+          "page": "30",
+          "reference": "Difference between meteoroids, meteors, and meteorites."
+        }
+      ],
+      "points": 2,
+      "difficulty": 2,
+      "explanation": "A meteorite is a space rock that survives its passage through the atmosphere and lands on Earth."
+    },
+    {
+      "id": "Q46",
+      "question": "Which African country is famous for the pyramids of Giza?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Sudan"
+        },
+        {
+          "key": "B",
+          "text": "Egypt"
+        },
+        {
+          "key": "C",
+          "text": "Libya"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO5"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Historic Landmarks",
+          "page": "20",
+          "reference": "Ancient monuments of the world."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "The pyramids of Giza are in Egypt."
+    },
+    {
+      "id": "Q47",
+      "question": "Which planet is known for having a Great Red Spot storm?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Saturn"
+        },
+        {
+          "key": "B",
+          "text": "Jupiter"
+        },
+        {
+          "key": "C",
+          "text": "Neptune"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO6"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Gas Giants",
+          "page": "22",
+          "reference": "Major atmospheric features of the outer planets."
+        }
+      ],
+      "points": 2,
+      "difficulty": 1,
+      "explanation": "Jupiter is famous for the Great Red Spot, a giant storm."
+    },
+    {
+      "id": "Q48",
+      "question": "Which country has Brasília as its capital?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Brazil"
+        },
+        {
+          "key": "B",
+          "text": "Argentina"
+        },
+        {
+          "key": "C",
+          "text": "Chile"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO3"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "South American Capitals",
+          "page": "8",
+          "reference": "Overview of capital cities in South America."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "Brasília is the capital of Brazil."
+    },
+    {
+      "id": "Q49",
+      "question": "Which phase occurs when the Moon is completely illuminated as seen from Earth?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "New Moon"
+        },
+        {
+          "key": "B",
+          "text": "Full Moon"
+        },
+        {
+          "key": "C",
+          "text": "Half Moon"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO2",
+        "LO4"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 2",
+          "section": "Moon Phases",
+          "page": "19",
+          "reference": "Sequence of visible lunar phases."
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "During a Full Moon, the Moon appears fully illuminated from Earth."
+    },
+    {
+      "id": "Q50",
+      "question": "Which mountain range separates much of Europe from Asia?",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Andes"
+        },
+        {
+          "key": "B",
+          "text": "Ural Mountains"
+        },
+        {
+          "key": "C",
+          "text": "Alps"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO5"
+      ],
+      "correctAnswers": [
+        "B"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Chapter 1",
+          "section": "Mountain Ranges",
+          "page": "18",
+          "reference": "Important mountain boundaries between regions."
+        }
+      ],
+      "points": 2,
+      "difficulty": 2,
+      "explanation": "The Ural Mountains are commonly used as part of the boundary between Europe and Asia."
+    },
+    {
+      "id": "Q51",
+      "question": "Bla bla",
+      "choices": [
+        {
+          "key": "A",
+          "text": "Bla"
+        },
+        {
+          "key": "B",
+          "text": "No Bla"
+        }
+      ],
+      "shuffleChoices": false,
+      "learningObjectiveIds": [
+        "LO6"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "Bla",
+          "section": "",
+          "page": "",
+          "reference": ""
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": ""
     }
   ]
 }

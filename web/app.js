@@ -2,6 +2,7 @@ const state = {
   dbPath: "",
   isDirty: false,
   lastSavedSnapshot: "",
+  pendingNavigationHref: "",
   quiz: null,
   selectedQuestionIndex: 0,
   showReloadNotice: false,
@@ -16,11 +17,13 @@ const MAX_CHOICE_COUNT = CHOICE_KEYS.length;
 
 const elements = {
   addChoice: document.querySelector("#add-choice"),
+  addObjective: document.querySelector("#add-objective"),
   addQuestion: document.querySelector("#add-question"),
   addLocation: document.querySelector("#add-location"),
   bookLocations: document.querySelector("#book-locations"),
   cancelReload: document.querySelector("#cancel-reload"),
   choicesEditor: document.querySelector("#choices-editor"),
+  confirmUnsavedNav: document.querySelector("#confirm-unsaved-nav"),
   confirmReload: document.querySelector("#confirm-reload"),
   dbPath: document.querySelector("#db-path"),
   deleteQuestion: document.querySelector("#delete-question"),
@@ -32,6 +35,7 @@ const elements = {
   questionEditor: document.querySelector("#question-editor"),
   questionHeading: document.querySelector("#question-heading"),
   questionId: document.querySelector("#question-id"),
+  questionPoints: document.querySelector("#question-points"),
   questionList: document.querySelector("#question-list"),
   questionObjectives: document.querySelector("#question-objectives"),
   questionShuffle: document.querySelector("#question-shuffle"),
@@ -42,8 +46,12 @@ const elements = {
   reloadQuiz: document.querySelector("#reload-quiz"),
   reloadNotice: document.querySelector("#reload-notice"),
   removeChoice: document.querySelector("#remove-choice"),
+  removeObjective: document.querySelector("#remove-objective"),
+  unsavedNavBackdrop: document.querySelector("#unsaved-nav-backdrop"),
+  unsavedNavModal: document.querySelector("#unsaved-nav-modal"),
   saveQuiz: document.querySelector("#save-quiz"),
   saveStatus: document.querySelector("#save-status"),
+  cancelUnsavedNav: document.querySelector("#cancel-unsaved-nav"),
 };
 
 const templates = {
@@ -57,20 +65,30 @@ function hasUnsavedChanges() {
   return state.isDirty;
 }
 
-function confirmDiscardUnsavedChanges() {
-  if (!hasUnsavedChanges()) {
-    return true;
-  }
-  return window.confirm("You have unsaved changes. Leaving this page will discard them. Continue?");
+function renderUnsavedNavModal() {
+  const isOpen = Boolean(state.pendingNavigationHref);
+  elements.unsavedNavModal.classList.toggle("is-open", isOpen);
+  elements.unsavedNavModal.setAttribute("aria-hidden", String(!isOpen));
+}
+
+function openUnsavedNavModal(href) {
+  state.pendingNavigationHref = href;
+  renderUnsavedNavModal();
+}
+
+function closeUnsavedNavModal() {
+  state.pendingNavigationHref = "";
+  renderUnsavedNavModal();
 }
 
 function wireNavigationGuards() {
   for (const link of document.querySelectorAll(".page-link")) {
     link.addEventListener("click", (event) => {
-      if (confirmDiscardUnsavedChanges()) {
+      if (!hasUnsavedChanges()) {
         return;
       }
       event.preventDefault();
+      openUnsavedNavModal(link.href);
     });
   }
 
@@ -167,6 +185,7 @@ function normalizeQuestionDraft(question = {}) {
       page: location.page ?? "",
       reference: location.reference ?? "",
     })),
+    points: clampPoints(question.points),
     difficulty: clampDifficulty(question.difficulty),
     explanation: question.explanation ?? "",
   };
@@ -189,6 +208,14 @@ function clampDifficulty(value) {
   return Math.min(5, Math.max(1, numeric));
 }
 
+function clampPoints(value) {
+  const numeric = Number.parseInt(value, 10);
+  if (Number.isNaN(numeric)) {
+    return 1;
+  }
+  return Math.max(1, numeric);
+}
+
 function nextQuestionId() {
   const ids = new Set((state.quiz?.questions ?? []).map((question) => question.id));
   let counter = (state.quiz?.questions.length ?? 0) + 1;
@@ -198,8 +225,34 @@ function nextQuestionId() {
   return `Q${counter}`;
 }
 
+function nextLearningObjectiveId() {
+  const ids = new Set((state.quiz?.learningObjectives ?? []).map((objective) => objective.id));
+  let counter = 1;
+  while (ids.has(`LO${counter}`)) {
+    counter += 1;
+  }
+  return `LO${counter}`;
+}
+
 function currentQuestionIndex() {
   return state.selectedQuestionIndex;
+}
+
+function initialQuestionIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const questionId = params.get("questionId");
+  return typeof questionId === "string" ? questionId.trim() : "";
+}
+
+function syncEditorUrl() {
+  const url = new URL(window.location.href);
+  const question = getSelectedQuestion();
+  if (question?.id) {
+    url.searchParams.set("questionId", question.id);
+  } else {
+    url.searchParams.delete("questionId");
+  }
+  window.history.replaceState({}, "", url);
 }
 
 function updateSelectedQuestion(updater) {
@@ -238,6 +291,7 @@ function renderQuestionList() {
     button.append(id, text);
     button.addEventListener("click", () => {
       state.selectedQuestionIndex = index;
+      syncEditorUrl();
       render();
     });
 
@@ -264,6 +318,7 @@ function renderLearningObjectives() {
     fragment.append(node);
   }
   elements.learningObjectives.replaceChildren(fragment);
+  elements.removeObjective.disabled = state.quiz.learningObjectives.length <= 1;
 }
 
 function renderQuestionObjectiveLinks() {
@@ -399,6 +454,7 @@ function renderQuestionEditor() {
   elements.questionHeading.textContent = draft.id || "Untitled question";
   elements.questionId.value = draft.id;
   elements.questionDifficulty.value = String(draft.difficulty);
+  elements.questionPoints.value = String(draft.points);
   elements.questionShuffle.checked = draft.shuffleChoices;
   elements.questionText.value = draft.question;
   elements.questionExplanation.value = draft.explanation;
@@ -443,6 +499,7 @@ function render() {
   renderErrors();
   renderReloadNotice();
   renderStatus();
+  syncEditorUrl();
 }
 
 async function loadQuiz() {
@@ -456,7 +513,11 @@ async function loadQuiz() {
   state.quiz = payload.quiz;
   state.lastSavedSnapshot = snapshotQuiz(payload.quiz);
   state.isDirty = false;
-  state.selectedQuestionIndex = 0;
+  const requestedQuestionId = initialQuestionIdFromUrl();
+  const requestedIndex = requestedQuestionId
+    ? state.quiz.questions.findIndex((question) => question.id === requestedQuestionId)
+    : -1;
+  state.selectedQuestionIndex = requestedIndex >= 0 ? requestedIndex : 0;
   state.showReloadNotice = false;
   state.validationErrors = [];
   render();
@@ -495,6 +556,28 @@ async function saveQuiz() {
 }
 
 function wireGlobalFields() {
+  elements.cancelUnsavedNav.addEventListener("click", () => {
+    closeUnsavedNavModal();
+  });
+
+  elements.confirmUnsavedNav.addEventListener("click", () => {
+    const href = state.pendingNavigationHref;
+    closeUnsavedNavModal();
+    if (href) {
+      window.location.href = href;
+    }
+  });
+
+  elements.unsavedNavBackdrop.addEventListener("click", () => {
+    closeUnsavedNavModal();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.pendingNavigationHref) {
+      closeUnsavedNavModal();
+    }
+  });
+
   elements.quizTitle.addEventListener("input", (event) => {
     if (!state.quiz) {
       return;
@@ -527,6 +610,13 @@ function wireGlobalFields() {
     });
   });
 
+  elements.questionPoints.addEventListener("input", (event) => {
+    updateSelectedQuestion((draft) => {
+      draft.points = clampPoints(event.target.value);
+      return draft;
+    });
+  });
+
   elements.questionShuffle.addEventListener("change", (event) => {
     updateSelectedQuestion((draft) => {
       draft.shuffleChoices = event.target.checked;
@@ -549,6 +639,46 @@ function wireGlobalFields() {
     });
   });
 
+  elements.addObjective.addEventListener("click", () => {
+    if (!state.quiz) {
+      return;
+    }
+    state.quiz.learningObjectives.push({
+      id: nextLearningObjectiveId(),
+      label: "",
+    });
+    recordQuizMutation();
+    render();
+    setStatus("Learning objective added. Save when ready.");
+  });
+
+  elements.removeObjective.addEventListener("click", () => {
+    if (!state.quiz) {
+      return;
+    }
+    if (state.quiz.learningObjectives.length <= 1) {
+      setStatus("At least one learning objective must remain in the quiz.", true);
+      return;
+    }
+
+    const removedObjective = state.quiz.learningObjectives.pop();
+    const fallbackObjectiveId = state.quiz.learningObjectives[0]?.id ?? "";
+    for (const question of state.quiz.questions) {
+      if (!Array.isArray(question.learningObjectiveIds)) {
+        question.learningObjectiveIds = fallbackObjectiveId ? [fallbackObjectiveId] : [];
+        continue;
+      }
+      question.learningObjectiveIds = question.learningObjectiveIds.filter((id) => id !== removedObjective.id);
+      if (question.learningObjectiveIds.length === 0 && fallbackObjectiveId) {
+        question.learningObjectiveIds = [fallbackObjectiveId];
+      }
+    }
+
+    recordQuizMutation();
+    render();
+    setStatus(`Learning objective ${removedObjective.id} removed. Save to persist the change.`);
+  });
+
   elements.addQuestion.addEventListener("click", () => {
     if (!state.quiz) {
       return;
@@ -559,6 +689,7 @@ function wireGlobalFields() {
       choices: CHOICE_KEYS.slice(0, MIN_CHOICE_COUNT).map((key) => ({ key, text: "" })),
       correctAnswers: ["A"],
       bookLocations: [defaultBookLocation()],
+      points: 1,
     });
     state.quiz.questions.push(newQuestion);
     state.selectedQuestionIndex = state.quiz.questions.length - 1;

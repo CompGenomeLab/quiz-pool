@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import base64
 import html
 import io
 import json
 import math
 import mimetypes
 import random
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +22,9 @@ from uuid import uuid4
 import zipfile
 
 from jsonschema import Draft202012Validator
+from omr import SheetConfig, generate_omr_sheet
+from pypdf import PdfReader, PdfWriter
+from pyppeteer import launch
 import segno
 
 
@@ -29,15 +35,30 @@ DEFAULT_SCHEMA = ROOT / "scheme.json"
 DEFAULT_EXAM_STORE_NAME = "generated_exams.json"
 DISPLAY_KEYS = ("A", "B", "C", "D", "E")
 DEFAULT_PRINTABLE_FOLDER = "exam-printables"
-QUESTION_POOL_PRINTABLE_NAME = "question-pool.html"
+QUESTION_POOL_PRINTABLE_NAME = "question-pool.pdf"
 QUESTION_PAGE_CAPACITY = 38
+MAX_QUESTIONS_PER_EXAM = 50
+DEFAULT_OMR_INSTRUCTIONS = (
+    "Fully fill the bubbles. Do not leave any student ID column blank."
+)
 DEFAULT_EXAM_RULES = [
-    "Complete the student information block before the exam begins.",
+    DEFAULT_OMR_INSTRUCTIONS,
     "Read every question carefully and select all correct answers for each question.",
     "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
     "Do not communicate with other students or use unauthorized materials during the exam.",
     "Remain seated until instructed to stop and submit your paper.",
 ]
+GRADE_ALLOWED_LABELS = set(DISPLAY_KEYS)
+
+
+def default_exam_rules(omr_instructions: str = DEFAULT_OMR_INSTRUCTIONS) -> list[str]:
+    return [
+        omr_instructions,
+        "Read every question carefully and select all correct answers for each question.",
+        "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
+        "Do not communicate with other students or use unauthorized materials during the exam.",
+        "Remain seated until instructed to stop and submit your paper.",
+    ]
 
 
 @dataclass
@@ -46,6 +67,18 @@ class AppState:
     schema_path: Path
     exam_store_path: Path
     validator: Draft202012Validator
+
+
+def default_exam_store_path_for(db_path: Path) -> Path:
+    return (db_path.parent / DEFAULT_EXAM_STORE_NAME).resolve()
+
+
+def display_default_db_path() -> str:
+    return str(DEFAULT_DB.relative_to(ROOT))
+
+
+def display_default_exam_store_path() -> str:
+    return str(default_exam_store_path_for(DEFAULT_DB).relative_to(ROOT))
 
 
 def load_json(path: Path) -> Any:
@@ -80,6 +113,8 @@ def validation_errors(
 def load_exam_store(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"examSets": []}
+    if path.stat().st_size == 0:
+        return {"examSets": []}
 
     payload = load_json(path)
     if not isinstance(payload, dict):
@@ -90,6 +125,29 @@ def load_exam_store(path: Path) -> dict[str, Any]:
         raise ValueError("Exam store must contain an 'examSets' array")
 
     return payload
+
+
+def validate_quiz_file(path: Path, validator: Draft202012Validator) -> None:
+    if not path.is_file():
+        raise ValueError(f"Quiz file not found: {path}")
+
+    quiz = load_json(path)
+    errors = validation_errors(validator, quiz)
+    if errors:
+        message = "; ".join(f"{item['path']}: {item['message']}" for item in errors)
+        raise ValueError(f"Quiz file does not match the schema: {message}")
+
+
+def validate_exam_store_file(path: Path) -> None:
+    if path.exists():
+        load_exam_store(path)
+
+
+def set_active_paths(state: AppState, *, db_path: Path, exam_store_path: Path) -> None:
+    validate_quiz_file(db_path, state.validator)
+    validate_exam_store_file(exam_store_path)
+    state.db_path = db_path
+    state.exam_store_path = exam_store_path
 
 
 def append_exam_set(path: Path, exam_set: dict[str, Any]) -> None:
@@ -115,6 +173,13 @@ def find_exam_set(path: Path, exam_set_id: str) -> dict[str, Any] | None:
         if isinstance(exam_set, dict) and exam_set.get("examSetId") == exam_set_id:
             return exam_set
     return None
+
+
+def list_exam_sets(path: Path) -> list[dict[str, Any]]:
+    store = load_exam_store(path)
+    exam_sets = [exam_set for exam_set in store.get("examSets", []) if isinstance(exam_set, dict)]
+    exam_sets.sort(key=lambda item: str(item.get("generatedAt") or ""), reverse=True)
+    return exam_sets
 
 
 def dedupe_preserve_order(items: list[Any]) -> list[Any]:
@@ -312,6 +377,7 @@ def normalize_generation_request(
     exam_date = normalize_optional_string(payload, "examDate", errors)
     start_time = normalize_optional_string(payload, "startTime", errors)
     total_time_minutes = normalize_optional_positive_int(payload, "totalTimeMinutes", errors)
+    omr_instructions = normalize_optional_string(payload, "omrInstructions", errors)
     exam_rules = normalize_rule_list(payload, "examRules", errors)
 
     known_objective_ids = {
@@ -345,6 +411,14 @@ def normalize_generation_request(
             }
         )
 
+    if question_count is not None and question_count > MAX_QUESTIONS_PER_EXAM:
+        errors.append(
+            {
+                "path": "questionCount",
+                "message": f"questionCount cannot be greater than {MAX_QUESTIONS_PER_EXAM}",
+            }
+        )
+
     if errors:
         return None, errors
 
@@ -363,10 +437,444 @@ def normalize_generation_request(
             "examDate": exam_date,
             "startTime": start_time,
             "totalTimeMinutes": total_time_minutes,
+            "omrInstructions": omr_instructions,
             "examRules": exam_rules,
         },
         [],
     )
+
+
+def normalize_grading_request(payload: Any) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    if not isinstance(payload, dict):
+        return None, [{"path": "<body>", "message": "Grading payload must be a JSON object"}]
+
+    errors: list[dict[str, str]] = []
+    input_path = normalize_optional_string(payload, "inputPath", errors)
+    if not input_path:
+        errors.append({"path": "inputPath", "message": "inputPath must be a non-empty path to a PDF or directory"})
+    if errors:
+        return None, errors
+    return ({"inputPath": input_path}, [])
+
+
+def normalize_annotation_request(payload: Any) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    if not isinstance(payload, dict):
+        return None, [{"path": "<body>", "message": "Annotation payload must be a JSON object"}]
+
+    errors: list[dict[str, str]] = []
+    input_path = normalize_optional_string(payload, "inputPath", errors)
+    output_path = normalize_optional_string(payload, "outputPath", errors)
+    if not input_path:
+        errors.append({"path": "inputPath", "message": "inputPath must be a non-empty path to a PDF or directory"})
+    if not output_path:
+        errors.append({"path": "outputPath", "message": "outputPath must be a non-empty output directory path"})
+    if errors:
+        return None, errors
+    return ({"inputPath": input_path, "outputPath": output_path}, [])
+
+
+def run_omr_grade(input_path: Path) -> list[dict[str, Any]]:
+    command = ["uv", "run", "omr-grade", str(input_path)]
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    if completed.returncode == 0:
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"omr-grade returned invalid JSON: {error.msg}") from error
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if isinstance(payload, dict):
+            source_name = input_path.name if input_path.is_file() else str(input_path)
+            return [{"source_pdf": source_name, **payload}]
+        raise ValueError("omr-grade returned an unsupported JSON payload")
+
+    error_text = completed.stderr.strip() or completed.stdout.strip() or f"omr-grade failed with exit code {completed.returncode}"
+    if input_path.is_file():
+        return [
+            {
+                "source_pdf": input_path.name,
+                "qr_data": None,
+                "student_id": "",
+                "marked_answers": {},
+                "omr_error": error_text,
+            }
+        ]
+    raise ValueError(error_text)
+
+
+def run_omr_annotate(
+    input_path: Path,
+    output_path: Path,
+    *,
+    correct_answers: dict[str, list[str]] | None = None,
+) -> dict[str, Any]:
+    command = ["uv", "run", "omr-annotate", str(input_path), "--output", str(output_path)]
+    if correct_answers:
+        command.extend(["--correct-answers", json.dumps(correct_answers, separators=(",", ":"))])
+
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        error_text = completed.stderr.strip() or completed.stdout.strip() or f"omr-annotate failed with exit code {completed.returncode}"
+        raise ValueError(error_text)
+
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"omr-annotate returned invalid JSON: {error.msg}") from error
+    if not isinstance(payload, dict):
+        raise ValueError("omr-annotate returned an unsupported JSON payload")
+    return payload
+
+
+def normalize_marked_answers(raw_value: Any) -> dict[str, list[str]]:
+    if not isinstance(raw_value, dict):
+        return {}
+
+    normalized: dict[str, list[str]] = {}
+    for raw_key, raw_answers in raw_value.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        labels: list[str] = []
+        if isinstance(raw_answers, list):
+            for answer in raw_answers:
+                if not isinstance(answer, str):
+                    continue
+                label = answer.strip().upper()
+                if label:
+                    labels.append(label)
+        normalized[key] = dedupe_preserve_order(labels)
+    return normalized
+
+
+def build_variant_lookup(store: dict[str, Any]) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+    lookup: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for exam_set in store.get("examSets", []):
+        if not isinstance(exam_set, dict):
+            continue
+        for variant in exam_set.get("variants", []):
+            if not isinstance(variant, dict):
+                continue
+            variant_id = variant.get("variantId")
+            if isinstance(variant_id, str) and variant_id.strip():
+                lookup[variant_id] = (exam_set, variant)
+    return lookup
+
+
+def analyze_grade_result(
+    result: dict[str, Any],
+    variant_lookup: dict[str, tuple[dict[str, Any], dict[str, Any]]],
+) -> dict[str, Any]:
+    source_pdf = str(result.get("source_pdf") or "")
+    student_id = str(result.get("student_id") or "").strip()
+    qr_data = result.get("qr_data")
+    marked_answers = normalize_marked_answers(result.get("marked_answers"))
+    omr_error = str(result.get("omr_error") or "").strip()
+    issues: list[str] = []
+    question_details: list[dict[str, Any]] = []
+    exam_set_id = ""
+    variant_id = ""
+    exam_name = ""
+    variant_question_count = 0
+    detected_question_count = len(marked_answers)
+    summary = {
+        "correctCount": 0,
+        "incorrectCount": 0,
+        "blankCount": 0,
+        "missingCount": 0,
+        "invalidCount": 0,
+        "earnedPoints": 0,
+        "possiblePoints": 0,
+    }
+    has_mismatch = False
+
+    if omr_error:
+        issues.append(f"OMR error: {omr_error}")
+
+    if not isinstance(qr_data, dict):
+        issues.append("QR data is missing or could not be decoded as JSON.")
+    else:
+        exam_set_id = str(qr_data.get("examSetId") or "").strip()
+        variant_id = str(qr_data.get("variantId") or "").strip()
+        if not exam_set_id:
+            issues.append("QR data is missing examSetId.")
+        if not variant_id:
+            issues.append("QR data is missing variantId.")
+
+    matched_record = variant_lookup.get(variant_id) if variant_id else None
+    if variant_id and matched_record is None:
+        issues.append(f"Variant {variant_id} was not found in the exam store.")
+
+    if matched_record is not None:
+        exam_set, variant = matched_record
+        exam_name = str(get_print_settings(exam_set).get("examName") or "")
+        stored_exam_set_id = str(exam_set.get("examSetId") or "")
+        if exam_set_id and exam_set_id != stored_exam_set_id:
+            issues.append(
+                f"QR examSetId {exam_set_id} does not match stored exam set {stored_exam_set_id} for variant {variant_id}."
+            )
+        exam_set_id = stored_exam_set_id
+        questions = [question for question in variant.get("questions", []) if isinstance(question, dict)]
+        variant_question_count = len(questions)
+        if detected_question_count != variant_question_count:
+            issues.append(
+                f"Detected {detected_question_count} question rows but variant expects {variant_question_count}."
+            )
+        expected_positions = {str(question.get("position")) for question in questions}
+        unexpected_positions = sorted(key for key in marked_answers if key not in expected_positions)
+        if unexpected_positions:
+            issues.append(
+                "Detected unexpected question rows: " + ", ".join(unexpected_positions) + "."
+            )
+
+        question_by_position = {
+            str(question.get("position")): question
+            for question in questions
+            if isinstance(question.get("position"), int)
+        }
+        for position in range(1, variant_question_count + 1):
+            position_key = str(position)
+            question = question_by_position.get(position_key, {})
+            allowed = [
+                str(choice.get("key"))
+                for choice in question.get("displayChoices", [])
+                if isinstance(choice, dict) and isinstance(choice.get("key"), str)
+            ]
+            correct = [
+                str(label)
+                for label in question.get("displayCorrectAnswers", [])
+                if isinstance(label, str)
+            ]
+            points = int(question.get("points") or 1)
+            marked = marked_answers.get(position_key)
+            status = "missing"
+            earned_points = 0
+            detail_issues: list[str] = []
+            summary["possiblePoints"] += points
+            if marked is None:
+                summary["missingCount"] += 1
+                detail_issues.append("Question row was not detected.")
+            else:
+                invalid_labels = [label for label in marked if label not in allowed or label not in GRADE_ALLOWED_LABELS]
+                if invalid_labels:
+                    status = "invalid"
+                    summary["invalidCount"] += 1
+                    detail_issues.append(
+                        f"Marked invalid choice(s): {', '.join(invalid_labels)}. Allowed choices: {', '.join(allowed) or 'none'}."
+                    )
+                elif not marked:
+                    status = "blank"
+                    summary["blankCount"] += 1
+                elif set(marked) == set(correct):
+                    status = "correct"
+                    summary["correctCount"] += 1
+                    earned_points = points
+                    summary["earnedPoints"] += points
+                else:
+                    status = "incorrect"
+                    summary["incorrectCount"] += 1
+            if detail_issues:
+                has_mismatch = True
+            question_details.append(
+                {
+                    "position": position,
+                    "prompt": str(question.get("question") or ""),
+                    "allowedChoices": allowed,
+                    "correctAnswers": correct,
+                    "markedAnswers": marked if marked is not None else [],
+                    "points": points,
+                    "earnedPoints": earned_points,
+                    "status": status,
+                    "issues": detail_issues,
+                }
+            )
+
+    if issues:
+        has_mismatch = True
+
+    if omr_error:
+        row_status = "omr_error"
+    elif has_mismatch:
+        row_status = "mismatch"
+    else:
+        row_status = "ok"
+
+    return {
+        "sourcePdf": source_pdf,
+        "studentId": student_id,
+        "displayStudentId": student_id or "Unknown",
+        "qrData": qr_data,
+        "examSetId": exam_set_id,
+        "variantId": variant_id,
+        "examName": exam_name,
+        "omrError": omr_error,
+        "issues": issues,
+        "hasMismatch": has_mismatch,
+        "status": row_status,
+        "detectedQuestionCount": detected_question_count,
+        "variantQuestionCount": variant_question_count,
+        "summary": summary,
+        "questionDetails": question_details,
+    }
+
+
+def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
+    if not input_path.exists():
+        raise ValueError(f"Input path not found: {input_path}")
+    if input_path.is_file() and input_path.suffix.lower() != ".pdf":
+        raise ValueError("Input file must be a PDF")
+    if not input_path.is_dir() and not input_path.is_file():
+        raise ValueError("Input path must be a PDF file or a directory containing PDFs")
+
+    store = load_exam_store(state.exam_store_path)
+    variant_lookup = build_variant_lookup(store)
+    raw_results = run_omr_grade(input_path)
+    rows = [analyze_grade_result(result, variant_lookup) for result in raw_results]
+    duplicate_student_rows: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        student_id = row["studentId"]
+        if not student_id:
+            continue
+        duplicate_student_rows.setdefault(student_id, []).append(row)
+
+    duplicated_student_ids = {
+        student_id: student_rows
+        for student_id, student_rows in duplicate_student_rows.items()
+        if len(student_rows) > 1
+    }
+    for student_id, student_rows in duplicated_student_ids.items():
+        source_pdfs = ", ".join(
+            sorted({row["sourcePdf"] or "<unknown source>" for row in student_rows})
+        )
+        issue = (
+            f"Duplicate student ID {student_id} appears in multiple graded PDFs: {source_pdfs}."
+        )
+        for row in student_rows:
+            row["issues"].append(issue)
+            row["hasMismatch"] = True
+            if row["status"] == "ok":
+                row["status"] = "mismatch"
+
+    rows.sort(key=lambda row: (row["studentId"] == "", row["studentId"], row["sourcePdf"]))
+    for index, row in enumerate(rows, start=1):
+        row["rowIndex"] = index
+
+    return {
+        "inputPath": str(input_path),
+        "examStorePath": str(state.exam_store_path),
+        "rows": rows,
+        "summary": {
+            "processedCount": len(rows),
+            "knownStudentCount": sum(1 for row in rows if row["studentId"]),
+            "duplicateStudentIdCount": len(duplicated_student_ids),
+            "omrErrorCount": sum(1 for row in rows if row["omrError"]),
+            "mismatchCount": sum(1 for row in rows if row["hasMismatch"]),
+        },
+    }
+
+
+def build_annotation_answer_key(row: dict[str, Any]) -> dict[str, list[str]]:
+    answer_key: dict[str, list[str]] = {}
+    for question in row.get("questionDetails", []):
+        if not isinstance(question, dict):
+            continue
+        position = question.get("position")
+        correct_answers = question.get("correctAnswers")
+        if not isinstance(position, int) or not isinstance(correct_answers, list):
+            continue
+        normalized = [str(label).strip().upper() for label in correct_answers if isinstance(label, str) and str(label).strip()]
+        answer_key[str(position)] = dedupe_preserve_order(normalized)
+    return answer_key
+
+
+def resolve_annotation_source_path(input_path: Path, row: dict[str, Any]) -> Path:
+    if input_path.is_file():
+        return input_path
+
+    source_pdf = str(row.get("sourcePdf") or "").strip()
+    if not source_pdf:
+        raise ValueError("A graded row is missing its source PDF name, so it cannot be annotated.")
+
+    source_path = (input_path / source_pdf).resolve()
+    if not source_path.is_file():
+        raise ValueError(f"Graded source PDF not found for annotation: {source_path}")
+    return source_path
+
+
+def annotation_output_filename(row: dict[str, Any]) -> str:
+    row_index = row.get("rowIndex")
+    student_id = str(row.get("studentId") or "").strip() or "unknown"
+    normalized_student_id = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "-"
+        for character in student_id
+    ).strip("-") or "unknown"
+    if not isinstance(row_index, int) or row_index <= 0:
+        raise ValueError("Annotated file naming requires a valid grading row index.")
+    return f"{row_index}-{normalized_student_id}-annotated.pdf"
+
+
+def annotate_exam_pdfs(state: AppState, input_path: Path, output_path: Path) -> dict[str, Any]:
+    grading_result = grade_exam_pdfs(state, input_path)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    annotation_rows: list[dict[str, Any]] = []
+    for row in grading_result["rows"]:
+        source_path = resolve_annotation_source_path(input_path, row)
+        answer_key = build_annotation_answer_key(row)
+        target_output_path = output_path / annotation_output_filename(row)
+        annotate_payload = run_omr_annotate(
+            source_path,
+            target_output_path,
+            correct_answers=answer_key or None,
+        )
+        annotated_pdf = str(annotate_payload.get("annotated_pdf") or "").strip()
+        omr_error = str(annotate_payload.get("omr_error") or "").strip()
+        issues = list(row.get("issues", []))
+        if not answer_key:
+            issues.append("Annotation used no answer key because the exam variant could not be matched.")
+        if omr_error:
+            issues.append(f"omr-annotate reported an OMR error: {omr_error}")
+
+        annotation_rows.append(
+            {
+                "rowIndex": row.get("rowIndex", 0),
+                "sourcePdf": row.get("sourcePdf", ""),
+                "annotatedPdf": annotated_pdf,
+                "studentId": row.get("studentId", ""),
+                "displayStudentId": row.get("displayStudentId", "Unknown"),
+                "examSetId": row.get("examSetId", ""),
+                "variantId": row.get("variantId", ""),
+                "usedAnswerKey": bool(answer_key),
+                "omrError": omr_error,
+                "issues": issues,
+                "status": "omr_error" if omr_error else ("review" if issues else "ok"),
+            }
+        )
+
+    return {
+        "inputPath": str(input_path),
+        "outputPath": str(output_path),
+        "rows": annotation_rows,
+        "summary": {
+            "processedCount": len(annotation_rows),
+            "annotatedCount": sum(1 for row in annotation_rows if row["annotatedPdf"]),
+            "omrErrorCount": sum(1 for row in annotation_rows if row["omrError"]),
+            "usedAnswerKeyCount": sum(1 for row in annotation_rows if row["usedAnswerKey"]),
+        },
+    }
 
 
 def unrank_permutation(items: list[Any], rank: int) -> list[Any]:
@@ -415,6 +923,7 @@ def build_question_pool_entry(
         "sourceQuestionId": question["id"],
         "question": question["question"],
         "difficulty": question["difficulty"],
+        "points": question["points"],
         "chapters": extract_question_chapters(question),
         "learningObjectiveIds": list(question["learningObjectiveIds"]),
         "learningObjectives": [
@@ -432,6 +941,20 @@ def build_question_pool_entry(
     }
 
 
+def build_exam_set_summary(exam_set: dict[str, Any]) -> dict[str, Any]:
+    print_settings = get_print_settings(exam_set)
+    selection = exam_set.get("selection", {})
+    variants = [variant for variant in exam_set.get("variants", []) if isinstance(variant, dict)]
+    return {
+        "examSetId": str(exam_set.get("examSetId") or ""),
+        "generatedAt": str(exam_set.get("generatedAt") or ""),
+        "quiz": exam_set.get("quiz", {}),
+        "printSettings": print_settings,
+        "selectedQuestionCount": len(selection.get("selectedQuestionIds", [])),
+        "variantCount": len(variants),
+    }
+
+
 def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
     raw = exam_set.get("printSettings")
     if not isinstance(raw, dict):
@@ -443,6 +966,7 @@ def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
     exam_date = raw.get("examDate")
     start_time = raw.get("startTime")
     total_time_minutes = raw.get("totalTimeMinutes")
+    omr_instructions = raw.get("omrInstructions")
     exam_rules = raw.get("examRules")
 
     normalized_institution_name = institution_name.strip() if isinstance(institution_name, str) else ""
@@ -455,6 +979,9 @@ def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
         normalized_total_time = str(total_time_minutes)
     elif isinstance(total_time_minutes, str) and total_time_minutes.strip():
         normalized_total_time = total_time_minutes.strip()
+    normalized_omr_instructions = (
+        omr_instructions.strip() if isinstance(omr_instructions, str) and omr_instructions.strip() else DEFAULT_OMR_INSTRUCTIONS
+    )
     normalized_rules: list[str] = []
     if isinstance(exam_rules, list):
         normalized_rules = [
@@ -467,7 +994,7 @@ def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
     if not normalized_exam_name and isinstance(fallback_title, str):
         normalized_exam_name = fallback_title.strip()
     if not normalized_rules:
-        normalized_rules = list(DEFAULT_EXAM_RULES)
+        normalized_rules = default_exam_rules(normalized_omr_instructions)
 
     return {
         "institutionName": normalized_institution_name or "Institution Name",
@@ -476,6 +1003,7 @@ def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
         "examDate": normalized_exam_date,
         "startTime": normalized_start_time,
         "totalTimeMinutes": normalized_total_time,
+        "omrInstructions": normalized_omr_instructions,
         "examRules": normalized_rules,
     }
 
@@ -525,6 +1053,7 @@ def build_variant(
                 "sourceQuestionId": question["id"],
                 "question": question["question"],
                 "difficulty": question["difficulty"],
+                "points": question["points"],
                 "chapters": extract_question_chapters(question),
                 "learningObjectiveIds": list(question["learningObjectiveIds"]),
                 "learningObjectives": [
@@ -551,7 +1080,7 @@ def build_variant(
 
 def build_variant_printable_filename(position: int, total: int) -> str:
     width = max(2, len(str(max(total, 1))))
-    return f"student-variant-{position:0{width}d}.html"
+    return f"student-variant-{position:0{width}d}.pdf"
 
 
 def annotate_variant_printables(variants: list[dict[str, Any]]) -> None:
@@ -719,6 +1248,7 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
             "examDate": request["examDate"],
             "startTime": request["startTime"],
             "totalTimeMinutes": request["totalTimeMinutes"],
+            "omrInstructions": request["omrInstructions"],
             "examRules": request["examRules"],
         },
         "printableFolderName": DEFAULT_PRINTABLE_FOLDER,
@@ -957,7 +1487,7 @@ def render_question_pool_html(exam_set: dict[str, Any], question_pool: list[dict
         question_sections.append(
             f"""
 <section class="question">
-  <div class="question-head">Question {index} · {html.escape(question['sourceQuestionId'])} · Difficulty {question['difficulty']} · Chapters {html.escape(chapters)}</div>
+  <div class="question-head">Question {index} · {html.escape(question['sourceQuestionId'])} · Difficulty {question['difficulty']} · {question['points']} pt · Chapters {html.escape(chapters)}</div>
   <p class="question-title">{html.escape(question['question'])}</p>
   <ul class="choice-list">{choices}</ul>
 </section>
@@ -1039,9 +1569,12 @@ def render_student_print_css() -> str:
         background: var(--paper);
         box-shadow: 0 6mm 16mm rgba(0, 0, 0, 0.12);
         break-after: page;
+        break-inside: avoid;
         display: flex;
         flex-direction: column;
         margin: 0 auto;
+        page-break-after: always;
+        page-break-inside: avoid;
         height: 297mm;
         padding: 16mm 17mm 15mm;
         width: 210mm;
@@ -1049,6 +1582,7 @@ def render_student_print_css() -> str:
 
       .sheet-page:last-child {
         break-after: auto;
+        page-break-after: auto;
       }
 
       .sheet-header {
@@ -1356,6 +1890,32 @@ def render_student_print_css() -> str:
         visibility: hidden;
       }
 
+      .hidden-print-buffer {
+        display: none;
+      }
+
+      .sheet-page--omr {
+        padding: 0;
+        position: relative;
+      }
+
+      .sheet-page--omr .sheet-footer {
+        background: rgba(255, 255, 255, 0.92);
+        bottom: 0;
+        left: 0;
+        margin: 0;
+        padding: 2mm 0 3mm;
+        position: absolute;
+        right: 0;
+      }
+
+      .omr-sheet-image {
+        display: block;
+        height: 100%;
+        object-fit: fill;
+        width: 100%;
+      }
+
       @media print {
         html,
         body {
@@ -1370,6 +1930,10 @@ def render_student_print_css() -> str:
         .sheet-page {
           box-shadow: none;
           margin: 0;
+        }
+
+        .sheet-page--omr .sheet-footer {
+          background: rgba(255, 255, 255, 0.96);
         }
       }
 """
@@ -1400,6 +1964,7 @@ def render_student_cover_page(
             render_exam_detail("Start Time", print_settings["startTime"]),
             render_exam_detail("Total Time in Minutes", print_settings["totalTimeMinutes"]),
             render_exam_detail("Number of Questions", str(len(variant.get("questions", [])))),
+            render_exam_detail("Total Points", str(sum(int(question.get("points") or 1) for question in variant.get("questions", [])))),
             render_exam_detail(
                 "Number of Pages",
                 '<span class="js-total-pages">1</span>',
@@ -1486,10 +2051,81 @@ def render_student_question_page_template(
 """
 
 
+def build_omr_sheet_config(
+    exam_set: dict[str, Any],
+    variant: dict[str, Any],
+) -> SheetConfig:
+    print_settings = get_print_settings(exam_set)
+    option_counts = [len(question.get("displayChoices", [])) for question in variant.get("questions", [])]
+    return SheetConfig(
+        question_option_counts=option_counts,
+        exam_set_id=str(exam_set["examSetId"]),
+        variant_id=str(variant["variantId"]),
+        title=print_settings["examName"] or "Optical Mark Recognition Sheet",
+        instructions=print_settings["omrInstructions"],
+    )
+
+
+def build_omr_sheet_pdf_bytes(
+    exam_set: dict[str, Any],
+    variant: dict[str, Any],
+) -> bytes:
+    config = build_omr_sheet_config(exam_set, variant)
+    output = io.BytesIO()
+    generate_omr_sheet(config, output)
+    return output.getvalue()
+
+
+def build_omr_sheet_page_images(
+    exam_set: dict[str, Any],
+    variant: dict[str, Any],
+) -> list[str]:
+    with tempfile.TemporaryDirectory() as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        pdf_path = temp_dir / "omr-sheet.pdf"
+        image_prefix = temp_dir / "omr-page"
+        pdf_path.write_bytes(build_omr_sheet_pdf_bytes(exam_set, variant))
+        subprocess.run(
+            [
+                "pdftoppm",
+                "-png",
+                "-r",
+                "300",
+                str(pdf_path),
+                str(image_prefix),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        image_paths = sorted(temp_dir.glob("omr-page-*.png"))
+        return [
+            "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+            for path in image_paths
+        ]
+
+
+def render_student_omr_pages(exam_set: dict[str, Any], variant: dict[str, Any]) -> str:
+    print_settings = get_print_settings(exam_set)
+    omr_images = build_omr_sheet_page_images(exam_set, variant)
+    pages: list[str] = []
+    for index, image_data_uri in enumerate(omr_images):
+        pages.append(
+            f"""
+<section class="sheet-page sheet-page--omr">
+  <img class="omr-sheet-image" src="{image_data_uri}" alt="OMR answer sheet page {index + 1}" />
+</section>
+"""
+        )
+    return "".join(pages)
+
+
 def render_student_pagination_script() -> str:
     return """
     <script>
       (() => {
+        window.__quizPoolPrintableReady = false;
+
         function createQuestionPage() {
           const template = document.querySelector('#question-page-template');
           if (!(template instanceof HTMLTemplateElement)) return null;
@@ -1562,12 +2198,19 @@ def render_student_pagination_script() -> str:
             root.appendChild(page);
           });
 
+          const omrPages = Array.from(document.querySelectorAll('#omr-pages .sheet-page--omr'));
+          omrPages.forEach((page) => {
+            root.appendChild(page);
+          });
+
           updatePageCounters(finalPages.length + 1);
+          window.__quizPoolPrintableReady = true;
         }
 
         let scheduled = false;
         function schedulePagination() {
           if (scheduled) return;
+          window.__quizPoolPrintableReady = false;
           scheduled = true;
           requestAnimationFrame(() => {
             scheduled = false;
@@ -1584,8 +2227,14 @@ def render_student_pagination_script() -> str:
 """
 
 
-def render_variant_html(exam_set: dict[str, Any], variant: dict[str, Any]) -> str:
+def render_variant_html(
+    exam_set: dict[str, Any],
+    variant: dict[str, Any],
+    *,
+    include_omr_pages: bool = True,
+) -> str:
     print_settings = get_print_settings(exam_set)
+    omr_pages = render_student_omr_pages(exam_set, variant) if include_omr_pages else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -1605,11 +2254,57 @@ def render_variant_html(exam_set: dict[str, Any], variant: dict[str, Any]) -> st
     <template id="question-page-template">
       {render_student_question_page_template(exam_set, variant)}
     </template>
+    <div id="omr-pages" class="hidden-print-buffer">
+      {omr_pages}
+    </div>
     <div id="pagination-measure" class="pagination-measure" aria-hidden="true"></div>
 {render_student_pagination_script()}
   </body>
 </html>
 """
+
+
+async def render_html_to_pdf_bytes(html_content: str) -> bytes:
+    browser = await launch(
+        headless=True,
+        handleSIGINT=False,
+        handleSIGTERM=False,
+        handleSIGHUP=False,
+        args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+        ],
+    )
+    try:
+        page = await browser.newPage()
+        await page.emulateMedia("print")
+        await page.setContent(html_content)
+        if "__quizPoolPrintableReady" in html_content:
+            await page.waitForFunction("window.__quizPoolPrintableReady === true")
+        return await page.pdf(
+            {
+                "printBackground": True,
+                "preferCSSPageSize": True,
+            }
+        )
+    finally:
+        await browser.close()
+
+
+def render_html_to_pdf(html_content: str) -> bytes:
+    return asyncio.run(render_html_to_pdf_bytes(html_content))
+
+
+def append_pdf_documents(base_pdf: bytes, extra_pdf: bytes) -> bytes:
+    writer = PdfWriter()
+    for source in (base_pdf, extra_pdf):
+        reader = PdfReader(io.BytesIO(source))
+        for page in reader.pages:
+            writer.add_page(page)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
@@ -1622,18 +2317,24 @@ def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
     question_pool_name = str(exam_set.get("questionPoolFileName") or QUESTION_POOL_PRINTABLE_NAME)
 
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        question_pool_pdf = render_html_to_pdf(render_question_pool_html(exam_set, question_pool))
         archive.writestr(
             f"{base_folder}/{question_pool_name}",
-            render_question_pool_html(exam_set, question_pool),
+            question_pool_pdf,
         )
         for variant in variants:
             variant_file_name = str(
                 variant.get("printableFileName")
                 or build_variant_printable_filename(variant.get("printableOrdinal", 1), len(variants))
             )
+            student_printable_pdf = render_html_to_pdf(
+                render_variant_html(exam_set, variant, include_omr_pages=False)
+            )
+            omr_pdf = build_omr_sheet_pdf_bytes(exam_set, variant)
+            variant_pdf = append_pdf_documents(student_printable_pdf, omr_pdf)
             archive.writestr(
                 f"{base_folder}/{variant_file_name}",
-                render_variant_html(exam_set, variant),
+                variant_pdf,
             )
 
     return buffer.getvalue()
@@ -1645,8 +2346,17 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/api/session-paths":
+                self.handle_get_session_paths()
+                return
             if parsed.path == "/api/quiz":
                 self.handle_get_quiz()
+                return
+            if parsed.path == "/api/exams":
+                self.handle_list_exam_sets()
+                return
+            if parsed.path.startswith("/api/exams/set/"):
+                self.handle_get_exam_set(parsed.path)
                 return
             if parsed.path.startswith("/api/exams/variant-qr/"):
                 self.handle_get_variant_qr(parsed.path)
@@ -1668,11 +2378,20 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/api/session-paths":
+                self.handle_update_session_paths()
+                return
             if parsed.path == "/api/quiz":
                 self.handle_put_quiz()
                 return
             if parsed.path == "/api/exams/generate":
                 self.handle_generate_exams()
+                return
+            if parsed.path == "/api/exams/grade":
+                self.handle_grade_exams()
+                return
+            if parsed.path == "/api/exams/annotate":
+                self.handle_annotate_exams()
                 return
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
@@ -1703,6 +2422,117 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     "dbPath": str(state.db_path),
                     "schemaPath": str(state.schema_path),
                     "examStorePath": str(state.exam_store_path),
+                    "defaultDbPath": display_default_db_path(),
+                    "defaultExamStorePath": display_default_exam_store_path(),
+                }
+            )
+
+        def handle_get_session_paths(self) -> None:
+            self.send_json(
+                {
+                    "dbPath": str(state.db_path),
+                    "schemaPath": str(state.schema_path),
+                    "examStorePath": str(state.exam_store_path),
+                    "defaultDbPath": display_default_db_path(),
+                    "defaultExamStorePath": display_default_exam_store_path(),
+                }
+            )
+
+        def handle_update_session_paths(self) -> None:
+            payload, errors = self.read_json_body()
+            if errors:
+                self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            raw_db_path = payload.get("dbPath")
+            raw_exam_store_path = payload.get("examStorePath")
+            request_errors: list[dict[str, str]] = []
+            if not isinstance(raw_db_path, str) or not raw_db_path.strip():
+                request_errors.append({"path": "dbPath", "message": "Quiz DB path is required"})
+            if not isinstance(raw_exam_store_path, str) or not raw_exam_store_path.strip():
+                request_errors.append({"path": "examStorePath", "message": "Exam DB path is required"})
+            if request_errors:
+                self.send_json({"ok": False, "errors": request_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            db_path = Path(raw_db_path).expanduser().resolve()
+            exam_store_path = Path(raw_exam_store_path).expanduser().resolve()
+            try:
+                set_active_paths(state, db_path=db_path, exam_store_path=exam_store_path)
+            except ValueError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<paths>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            self.send_json(
+                {
+                    "ok": True,
+                    "dbPath": str(state.db_path),
+                    "schemaPath": str(state.schema_path),
+                    "examStorePath": str(state.exam_store_path),
+                    "defaultDbPath": display_default_db_path(),
+                    "defaultExamStorePath": display_default_exam_store_path(),
+                }
+            )
+
+        def handle_list_exam_sets(self) -> None:
+            try:
+                summaries = [build_exam_set_summary(item) for item in list_exam_sets(state.exam_store_path)]
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<store>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_json(
+                {
+                    "examStorePath": str(state.exam_store_path),
+                    "examSets": summaries,
+                }
+            )
+
+        def handle_get_exam_set(self, path: str) -> None:
+            exam_set_id = unquote(path.removeprefix("/api/exams/set/")).strip()
+            if not exam_set_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Exam set not found")
+                return
+
+            try:
+                exam_set = find_exam_set(state.exam_store_path, exam_set_id)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<store>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            if exam_set is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "Exam set not found")
+                return
+
+            variants = [variant for variant in exam_set.get("variants", []) if isinstance(variant, dict)]
+            annotate_variant_printables(variants)
+            annotate_variant_print_layouts(variants)
+            question_pool = exam_set.get("questionPool")
+            if not isinstance(question_pool, list):
+                question_pool = get_question_pool_for_export(state, exam_set)
+
+            self.send_json(
+                {
+                    "examStorePath": str(state.exam_store_path),
+                    "summary": build_exam_set_summary(exam_set),
+                    "examSet": {
+                        "examSetId": exam_set["examSetId"],
+                        "generatedAt": exam_set["generatedAt"],
+                        "quiz": exam_set["quiz"],
+                        "printSettings": get_print_settings(exam_set),
+                        "selection": exam_set["selection"],
+                        "questionPool": question_pool,
+                        "variants": variants,
+                    },
                 }
             )
 
@@ -1868,12 +2698,79 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             exam_run["examStorePath"] = str(state.exam_store_path)
             self.send_json(exam_run)
 
+        def handle_grade_exams(self) -> None:
+            payload, body_errors = self.read_json_body()
+            if body_errors:
+                self.send_json({"errors": body_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            request, request_errors = normalize_grading_request(payload)
+            if request_errors:
+                self.send_json({"errors": request_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            input_path = Path(request["inputPath"]).expanduser().resolve()
+            try:
+                result = grade_exam_pdfs(state, input_path)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<grading>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            except OSError as error:
+                self.send_json(
+                    {"errors": [{"path": "<grading>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_json(result)
+
+        def handle_annotate_exams(self) -> None:
+            payload, body_errors = self.read_json_body()
+            if body_errors:
+                self.send_json({"errors": body_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            request, request_errors = normalize_annotation_request(payload)
+            if request_errors:
+                self.send_json({"errors": request_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            input_path = Path(request["inputPath"]).expanduser().resolve()
+            output_path = Path(request["outputPath"]).expanduser().resolve()
+            try:
+                result = annotate_exam_pdfs(state, input_path, output_path)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<annotation>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            except OSError as error:
+                self.send_json(
+                    {"errors": [{"path": "<annotation>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_json(result)
+
         def serve_static(self, raw_path: str) -> None:
             request_path = raw_path or "/"
             if request_path == "/":
+                relative = "welcome.html"
+            elif request_path == "/welcome":
+                relative = "welcome.html"
+            elif request_path == "/editor":
                 relative = "index.html"
             elif request_path == "/generator":
                 relative = "generator.html"
+            elif request_path == "/viewer":
+                relative = "viewer.html"
+            elif request_path == "/grading":
+                relative = "grading.html"
             else:
                 relative = request_path.lstrip("/")
             target = (WEB_ROOT / relative).resolve()
@@ -1968,11 +2865,9 @@ def main() -> None:
     exam_store_path = (
         args.exam_store.resolve()
         if args.exam_store is not None
-        else (db_path.parent / DEFAULT_EXAM_STORE_NAME).resolve()
+        else default_exam_store_path_for(db_path)
     )
 
-    if not db_path.is_file():
-        raise SystemExit(f"Quiz file not found: {db_path}")
     if not schema_path.is_file():
         raise SystemExit(f"Schema file not found: {schema_path}")
     if not WEB_ROOT.is_dir():
@@ -1980,19 +2875,15 @@ def main() -> None:
 
     schema = load_json(schema_path)
     validator = Draft202012Validator(schema)
-    initial_quiz = load_json(db_path)
-    errors = validation_errors(validator, initial_quiz)
-    if errors:
-        raise SystemExit(
-            "Quiz file does not match the schema:\n"
-            + "\n".join(f"- {item['path']}: {item['message']}" for item in errors)
-        )
+    try:
+        validate_quiz_file(db_path, validator)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
-    if exam_store_path.exists():
-        try:
-            load_exam_store(exam_store_path)
-        except ValueError as error:
-            raise SystemExit(f"Exam store is invalid: {error}") from error
+    try:
+        validate_exam_store_file(exam_store_path)
+    except ValueError as error:
+        raise SystemExit(f"Exam store is invalid: {error}") from error
 
     app_state = AppState(
         db_path=db_path,

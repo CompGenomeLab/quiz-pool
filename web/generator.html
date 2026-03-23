@@ -7,6 +7,22 @@
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
+    <div id="pool-question-modal" class="detail-modal" aria-hidden="true">
+      <div id="pool-question-backdrop" class="detail-modal__backdrop"></div>
+      <section class="detail-modal__panel" role="dialog" aria-modal="true" aria-labelledby="pool-question-title">
+        <div class="panel__head">
+          <div>
+            <p class="eyebrow">Question Detail</p>
+            <h2 id="pool-question-title">Selected Question</h2>
+          </div>
+          <div class="panel__actions">
+            <a id="pool-question-edit-link" class="button button--primary" href="/index.html">Open In Editor</a>
+            <button id="close-pool-question" class="button button--ghost" type="button">Close</button>
+          </div>
+        </div>
+        <div id="pool-question-detail" class="question-detail-sheet"></div>
+      </section>
+    </div>
     <div class="page-shell">
       <header class="panel masthead no-print">
         <div class="masthead__copy">
@@ -18,8 +34,11 @@
           </p>
         </div>
         <nav class="page-links">
+          <a class="page-link" href="/">Welcome</a>
           <a class="page-link" href="/index.html">Editor</a>
           <a class="page-link is-active" href="/generator.html">Exam Generator</a>
+          <a class="page-link" href="/viewer.html">Exam Viewer</a>
+          <a class="page-link" href="/grading.html">Grading</a>
         </nav>
       </header>
 
@@ -72,6 +91,10 @@
                 <input id="total-time-minutes" type="number" min="1" step="1" />
               </label>
               <label class="field field--full">
+                <span>OMR Instructions</span>
+                <textarea id="omr-instructions" rows="3"></textarea>
+              </label>
+              <label class="field field--full">
                 <span>Exam Rules</span>
                 <textarea id="exam-rules" rows="6" placeholder="One rule per line"></textarea>
               </label>
@@ -81,7 +104,7 @@
           <div class="field-grid">
             <label class="field">
               <span>Questions Per Exam</span>
-              <input id="question-count" type="number" min="1" step="1" />
+              <input id="question-count" type="number" min="1" max="50" step="1" />
             </label>
             <label class="field">
               <span>Unique Variants</span>
@@ -172,9 +195,14 @@
                     <th>Prompt</th>
                     <th>Chapters</th>
                     <th>Difficulty</th>
+                    <th>Points</th>
                     <th>Objectives</th>
                     <th>Shuffle Choices</th>
-                    <th>Status</th>
+                    <th>
+                      <button id="sort-status" class="table-sort-button" type="button" aria-label="Sort by status category">
+                        Status
+                      </button>
+                    </th>
                     <th>Override</th>
                   </tr>
                 </thead>
@@ -237,6 +265,7 @@
                       <th>Variant ID</th>
                       <th>Question #</th>
                       <th>Source Question</th>
+                      <th>Points</th>
                       <th>Displayed Correct</th>
                       <th>Source Correct</th>
                     </tr>
@@ -254,8 +283,8 @@
               </div>
             </div>
             <p class="helper-copy no-print">
-                The ZIP download includes one teacher-facing question-pool document and one QR-coded printable
-                HTML file per student variant without visible raw IDs.
+                The ZIP download includes one teacher-facing question-pool PDF and one QR-coded printable
+                PDF per student variant without visible raw IDs.
             </p>
             <div id="variant-previews" class="variant-stack"></div>
           </section>

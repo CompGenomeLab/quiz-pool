@@ -24,7 +24,7 @@ Then open:
 - Persists `examSetId` and `variantId` records for later answer lookup and grading
 - Lets you customize printable metadata such as institution name, exam name, course name, exam date, start time, total time, and exam rules
 - Renders printable student variants with repeated QR codes instead of visible exam/variant IDs, plus a teacher answer-key summary
-- Downloads a ZIP of printable HTML documents for the shared question pool and each student variant, using ordinal student filenames inside the archive
+- Downloads a ZIP of printable PDF documents for the shared question pool and each student variant, using ordinal student filenames inside the archive
 - Exports the current generated exam run as JSON
 - Validates every save against `scheme.json`
 - Writes changes back to the JSON file atomically
