@@ -103,8 +103,12 @@
                   <p class="eyebrow">Question Pool</p>
                   <h2>Shared Source Questions</h2>
                 </div>
+                <div class="panel__actions">
+                  <button id="toggle-question-pool" class="button button--ghost" type="button" aria-expanded="false">Expand</button>
+                </div>
               </div>
-              <div class="table-wrap">
+              <div id="viewer-question-pool-section" class="hidden">
+                <div class="table-wrap">
                 <table class="pool-table">
                   <thead>
                     <tr>
@@ -117,6 +121,7 @@
                   </thead>
                   <tbody id="viewer-question-pool-body"></tbody>
                 </table>
+                </div>
               </div>
             </section>
 
@@ -126,15 +131,20 @@
                   <p class="eyebrow">Variants</p>
                   <h2>Student Variants</h2>
                 </div>
+                <div class="panel__actions">
+                  <button id="toggle-variants" class="button button--ghost" type="button" aria-expanded="false">Expand</button>
+                </div>
               </div>
-              <div class="viewer-variant-controls">
-                <label class="field field--full">
-                  <span>Variant</span>
-                  <select id="viewer-variant-select"></select>
-                </label>
-                <div id="viewer-variant-menu" class="viewer-set-list"></div>
+              <div id="viewer-variants-section" class="hidden">
+                <div class="viewer-variant-controls">
+                  <label class="field field--full">
+                    <span>Variant</span>
+                    <select id="viewer-variant-select"></select>
+                  </label>
+                  <div id="viewer-variant-menu" class="viewer-set-list"></div>
+                </div>
+                <div id="viewer-variant-list" class="variant-stack"></div>
               </div>
-              <div id="viewer-variant-list" class="variant-stack"></div>
             </section>
           </div>
         </main>

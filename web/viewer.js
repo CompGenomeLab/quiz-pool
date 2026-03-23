@@ -1,6 +1,8 @@
 const state = {
   examSets: [],
   examStorePath: "",
+  isQuestionPoolCollapsed: true,
+  isVariantsCollapsed: true,
   selectedExamSetId: "",
   selectedExamSet: null,
   selectedVariantId: "",
@@ -20,8 +22,11 @@ const elements = {
   deleteExam: document.querySelector("#viewer-delete-exam"),
   printResults: document.querySelector("#viewer-print-results"),
   results: document.querySelector("#viewer-results"),
+  toggleQuestionPool: document.querySelector("#toggle-question-pool"),
+  toggleVariants: document.querySelector("#toggle-variants"),
   variantList: document.querySelector("#viewer-variant-list"),
   variantMenu: document.querySelector("#viewer-variant-menu"),
+  variantsSection: document.querySelector("#viewer-variants-section"),
   variantSelect: document.querySelector("#viewer-variant-select"),
   viewerExamName: document.querySelector("#viewer-exam-name"),
   viewerExamSetId: document.querySelector("#viewer-exam-set-id"),
@@ -29,6 +34,7 @@ const elements = {
   viewerHeading: document.querySelector("#viewer-heading"),
   viewerQuestionCount: document.querySelector("#viewer-question-count"),
   viewerQuestionPoolBody: document.querySelector("#viewer-question-pool-body"),
+  viewerQuestionPoolSection: document.querySelector("#viewer-question-pool-section"),
   viewerQuizTitle: document.querySelector("#viewer-quiz-title"),
   viewerStatus: document.querySelector("#viewer-status"),
   viewerVariantCount: document.querySelector("#viewer-variant-count"),
@@ -257,6 +263,15 @@ function renderVariantMenu(variants) {
   elements.variantMenu.replaceChildren(fragment);
 }
 
+function renderSectionToggles() {
+  elements.viewerQuestionPoolSection.classList.toggle("hidden", state.isQuestionPoolCollapsed);
+  elements.variantsSection.classList.toggle("hidden", state.isVariantsCollapsed);
+  elements.toggleQuestionPool.textContent = state.isQuestionPoolCollapsed ? "Expand" : "Collapse";
+  elements.toggleVariants.textContent = state.isVariantsCollapsed ? "Expand" : "Collapse";
+  elements.toggleQuestionPool.setAttribute("aria-expanded", String(!state.isQuestionPoolCollapsed));
+  elements.toggleVariants.setAttribute("aria-expanded", String(!state.isVariantsCollapsed));
+}
+
 function renderSelectedExamSet() {
   const hasExamSet = Boolean(state.selectedExamSet);
   elements.results.classList.toggle("hidden", !hasExamSet);
@@ -267,6 +282,7 @@ function renderSelectedExamSet() {
     elements.variantMenu.replaceChildren();
     elements.variantSelect.replaceChildren();
     elements.variantList.replaceChildren();
+    renderSectionToggles();
     return;
   }
 
@@ -283,6 +299,7 @@ function renderSelectedExamSet() {
   renderVariantOptions(examSet.variants);
   renderVariantMenu(examSet.variants);
   renderVariants(examSet.variants, examSet.printSettings);
+  renderSectionToggles();
 }
 
 async function downloadPrintableZip() {
@@ -424,6 +441,14 @@ function wireEvents() {
   elements.examSetSelect.addEventListener("change", async (event) => {
     await loadExamSet(event.target.value);
   });
+  elements.toggleQuestionPool.addEventListener("click", () => {
+    state.isQuestionPoolCollapsed = !state.isQuestionPoolCollapsed;
+    renderSectionToggles();
+  });
+  elements.toggleVariants.addEventListener("click", () => {
+    state.isVariantsCollapsed = !state.isVariantsCollapsed;
+    renderSectionToggles();
+  });
   elements.deleteExam.addEventListener("click", () => {
     void deleteSelectedExamSet();
   });
@@ -437,6 +462,7 @@ function wireEvents() {
 }
 
 wireEvents();
+renderSectionToggles();
 loadExamSets().catch((error) => {
   console.error(error);
   state.validationErrors = [{ path: "<viewer>", message: error.message }];
