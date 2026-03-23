@@ -84,33 +84,48 @@
                 <p class="eyebrow">Quiz Meta</p>
                 <h2>Pool Settings</h2>
               </div>
-              <button id="save-quiz" class="button button--primary" type="button">Save Changes</button>
-            </div>
-
-            <div class="field-grid field-grid--meta">
-              <label class="field">
-                <span>Title</span>
-                <input id="quiz-title" type="text" />
-              </label>
-
-              <label class="field field--full">
-                <span>Description</span>
-                <textarea id="quiz-description" rows="3" placeholder="Describe the quiz pool, its scope, and any notes for authors or reviewers."></textarea>
-              </label>
-            </div>
-
-            <div class="objective-block">
-              <div class="panel__subhead panel__subhead--split">
-                <div>
-                  <h3>Learning Objectives</h3>
-                  <p>These labels are global and are referenced by each question.</p>
-                </div>
-                <div class="panel__actions">
-                  <button id="add-objective" class="button button--ghost" type="button">Add Objective</button>
-                  <button id="remove-objective" class="button button--ghost" type="button">Remove Last Objective</button>
-                </div>
+              <div class="panel__actions">
+                <button id="toggle-meta-panel" class="button button--ghost" type="button" aria-expanded="true">Collapse</button>
+                <button id="save-quiz" class="button button--primary" type="button">Save Changes</button>
               </div>
-              <div id="learning-objectives" class="objective-grid"></div>
+            </div>
+
+            <div id="meta-panel-body" class="meta-panel__body">
+              <div class="meta-layout">
+              <section class="meta-card">
+                <div class="panel__subhead">
+                  <div>
+                    <h3>Quiz Summary</h3>
+                    <p>These values rarely change, so keep them concise and stable.</p>
+                  </div>
+                </div>
+                <div class="field-grid field-grid--meta field-grid--meta-compact">
+                  <label class="field">
+                    <span>Title</span>
+                    <input id="quiz-title" type="text" />
+                  </label>
+
+                  <label class="field field--full">
+                    <span>Description</span>
+                    <textarea id="quiz-description" rows="2" placeholder="Describe the quiz pool, its scope, and any notes for authors or reviewers."></textarea>
+                  </label>
+                </div>
+              </section>
+
+              <section class="meta-card meta-card--objectives">
+                <div class="panel__subhead panel__subhead--split">
+                  <div>
+                    <h3>Learning Objectives</h3>
+                    <p>Global labels referenced by each question.</p>
+                  </div>
+                  <div class="panel__actions">
+                    <button id="add-objective" class="button button--ghost" type="button">Add Objective</button>
+                    <button id="remove-objective" class="button button--ghost" type="button">Remove Last Objective</button>
+                  </div>
+                </div>
+                <div id="learning-objectives" class="objective-grid objective-grid--compact"></div>
+              </section>
+              </div>
             </div>
           </section>
 

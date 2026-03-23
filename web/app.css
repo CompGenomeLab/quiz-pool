@@ -94,6 +94,14 @@ textarea {
   max-height: calc(100vh - 220px);
 }
 
+.editor-page .panel--meta {
+  padding: 18px 20px;
+}
+
+.meta-panel__body {
+  margin-top: 2px;
+}
+
 .editor-page .question-editor {
   overflow: auto;
   padding-right: 6px;
@@ -960,6 +968,118 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.tool-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.tool-card {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.74) 0%, rgba(244, 250, 255, 0.92) 100%);
+  border: 1px solid rgba(79, 127, 168, 0.18);
+  border-radius: 22px;
+  box-shadow: 0 20px 44px rgba(53, 93, 128, 0.12);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 210px;
+  overflow: hidden;
+  padding: 20px 20px 18px;
+  position: relative;
+  text-decoration: none;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+.tool-card::before {
+  background: linear-gradient(135deg, rgba(79, 127, 168, 0.18) 0%, rgba(29, 139, 115, 0.1) 100%);
+  border-radius: 999px;
+  content: "";
+  height: 120px;
+  pointer-events: none;
+  position: absolute;
+  right: -28px;
+  top: -36px;
+  width: 120px;
+}
+
+.tool-card:hover {
+  border-color: rgba(53, 93, 128, 0.28);
+  box-shadow: 0 26px 52px rgba(53, 93, 128, 0.18);
+  transform: translateY(-2px);
+}
+
+.tool-card__kicker {
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  position: relative;
+  text-transform: uppercase;
+  z-index: 1;
+}
+
+.tool-card__title {
+  font-family: "Rockwell", "Georgia", serif;
+  font-size: 1.35rem;
+  line-height: 1.1;
+  position: relative;
+  z-index: 1;
+}
+
+.tool-card__text {
+  color: var(--muted);
+  line-height: 1.55;
+  position: relative;
+  z-index: 1;
+}
+
+.tool-card__action {
+  align-items: center;
+  display: inline-flex;
+  font-size: 0.92rem;
+  font-weight: 700;
+  gap: 8px;
+  margin-top: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.tool-card__action::after {
+  content: "->";
+  font-size: 1rem;
+  transition: transform 180ms ease;
+}
+
+.tool-card:hover .tool-card__action::after {
+  transform: translateX(2px);
+}
+
+.tool-card--editor {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.78) 0%, rgba(242, 248, 255, 0.95) 100%);
+}
+
+.tool-card--generator {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.8) 0%, rgba(241, 252, 247, 0.96) 100%);
+}
+
+.tool-card--viewer {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.8) 0%, rgba(245, 248, 255, 0.96) 100%);
+}
+
+.tool-card--grading {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 246, 243, 0.96) 100%);
+}
+
 .viewer-variant-controls {
   display: grid;
   gap: 14px;
@@ -1013,6 +1133,10 @@ textarea {
   margin-bottom: 18px;
 }
 
+.field-grid--meta-compact {
+  margin-bottom: 0;
+}
+
 .field,
 .checkbox-pill,
 .choice-row__correct {
@@ -1058,6 +1182,52 @@ textarea {
 
 .objective-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.meta-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+}
+
+.meta-card {
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(79, 127, 168, 0.12);
+  border-radius: 18px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.meta-card--objectives {
+  display: flex;
+  flex-direction: column;
+}
+
+.objective-grid--compact {
+  flex: 1;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  max-height: 212px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.objective-grid--compact .field {
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(23, 33, 43, 0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.objective-grid--compact .field span {
+  color: var(--accent);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.objective-grid--compact .field input {
+  background: rgba(255, 255, 255, 0.84);
 }
 
 .editor-grid {
@@ -1174,9 +1344,12 @@ textarea {
 
   .editor-grid,
   .field-grid,
+  .meta-layout,
   .objective-grid,
   .summary-grid,
-  .result-summary {
+  .result-summary,
+  .welcome-links,
+  .tool-grid {
     grid-template-columns: 1fr;
   }
 

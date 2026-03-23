@@ -106,22 +106,30 @@
             <p class="helper-copy">
               These links use the currently active paths. Apply changes first if you edited either path above.
             </p>
-            <div class="welcome-links">
-              <a class="question-tile" href="/index.html">
-                <span class="question-tile__id">Editor</span>
-                <span class="question-tile__text">Edit the quiz JSON directly and validate against the schema.</span>
+            <div class="tool-grid">
+              <a class="tool-card tool-card--editor" href="/index.html">
+                <span class="tool-card__kicker">Authoring</span>
+                <strong class="tool-card__title">Editor</strong>
+                <span class="tool-card__text">Edit the quiz JSON directly, manage question metadata, and validate against the schema.</span>
+                <span class="tool-card__action">Open Editor</span>
               </a>
-              <a class="question-tile" href="/generator.html">
-                <span class="question-tile__id">Exam Generator</span>
-                <span class="question-tile__text">Generate saved exam sets and printable student variants.</span>
+              <a class="tool-card tool-card--generator" href="/generator.html">
+                <span class="tool-card__kicker">Assembly</span>
+                <strong class="tool-card__title">Exam Generator</strong>
+                <span class="tool-card__text">Build saved exam sets, shuffle variants, and prepare printable student packets.</span>
+                <span class="tool-card__action">Generate Exams</span>
               </a>
-              <a class="question-tile" href="/viewer.html">
-                <span class="question-tile__id">Exam Viewer</span>
-                <span class="question-tile__text">Inspect saved exam sets, variants, and QR codes.</span>
+              <a class="tool-card tool-card--viewer" href="/viewer.html">
+                <span class="tool-card__kicker">Review</span>
+                <strong class="tool-card__title">Exam Viewer</strong>
+                <span class="tool-card__text">Inspect generated exam sets, browse student variants, and review QR-backed layouts.</span>
+                <span class="tool-card__action">View Saved Exams</span>
               </a>
-              <a class="question-tile" href="/grading.html">
-                <span class="question-tile__id">Grading</span>
-                <span class="question-tile__text">Run OMR grading and validate scanned sheets against saved variants.</span>
+              <a class="tool-card tool-card--grading" href="/grading.html">
+                <span class="tool-card__kicker">Evaluation</span>
+                <strong class="tool-card__title">Grading</strong>
+                <span class="tool-card__text">Run OMR grading, inspect mismatches, export CSVs, and annotate scanned sheets.</span>
+                <span class="tool-card__action">Open Grading</span>
               </a>
             </div>
           </section>

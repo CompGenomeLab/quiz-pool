@@ -2,6 +2,7 @@ const state = {
   dbPath: "",
   isDirty: false,
   lastSavedSnapshot: "",
+  metaPanelCollapsed: false,
   pendingNavigationHref: "",
   quiz: null,
   selectedQuestionIndex: 0,
@@ -31,6 +32,7 @@ const elements = {
   errorList: document.querySelector("#error-list"),
   errorPanel: document.querySelector("#error-panel"),
   learningObjectives: document.querySelector("#learning-objectives"),
+  metaPanelBody: document.querySelector("#meta-panel-body"),
   questionDifficulty: document.querySelector("#question-difficulty"),
   questionEditor: document.querySelector("#question-editor"),
   questionHeading: document.querySelector("#question-heading"),
@@ -52,6 +54,7 @@ const elements = {
   saveQuiz: document.querySelector("#save-quiz"),
   saveStatus: document.querySelector("#save-status"),
   cancelUnsavedNav: document.querySelector("#cancel-unsaved-nav"),
+  toggleMetaPanel: document.querySelector("#toggle-meta-panel"),
 };
 
 const templates = {
@@ -60,6 +63,8 @@ const templates = {
   objective: document.querySelector("#objective-template"),
   objectiveLink: document.querySelector("#objective-link-template"),
 };
+
+const META_PANEL_STORAGE_KEY = "quiz-pool:meta-panel-collapsed";
 
 function hasUnsavedChanges() {
   return state.isDirty;
@@ -488,11 +493,18 @@ function renderMeta() {
   elements.dbPath.textContent = state.dbPath;
 }
 
+function renderMetaPanel() {
+  elements.metaPanelBody.classList.toggle("hidden", state.metaPanelCollapsed);
+  elements.toggleMetaPanel.textContent = state.metaPanelCollapsed ? "Expand" : "Collapse";
+  elements.toggleMetaPanel.setAttribute("aria-expanded", String(!state.metaPanelCollapsed));
+}
+
 function render() {
   if (!state.quiz) {
     return;
   }
   renderMeta();
+  renderMetaPanel();
   renderQuestionList();
   renderLearningObjectives();
   renderQuestionEditor();
@@ -592,6 +604,12 @@ function wireGlobalFields() {
     }
     state.quiz.description = event.target.value;
     recordQuizMutation();
+  });
+
+  elements.toggleMetaPanel.addEventListener("click", () => {
+    state.metaPanelCollapsed = !state.metaPanelCollapsed;
+    window.localStorage.setItem(META_PANEL_STORAGE_KEY, String(state.metaPanelCollapsed));
+    renderMetaPanel();
   });
 
   elements.questionId.addEventListener("input", (event) => {
@@ -784,6 +802,7 @@ function wireGlobalFields() {
   });
 }
 
+state.metaPanelCollapsed = window.localStorage.getItem(META_PANEL_STORAGE_KEY) === "true";
 wireGlobalFields();
 wireNavigationGuards();
 loadQuiz().catch((error) => {
