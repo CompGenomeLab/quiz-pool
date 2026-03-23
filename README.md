@@ -6,7 +6,7 @@ Schema-driven quiz authoring, exam generation, OMR sheet printing, saved exam vi
 
 ```bash
 uv sync
-uv run python main.py --db sample_quiz.json
+uv run quiz_pool --db sample_quiz.json
 ```
 
 Open `http://127.0.0.1:8000`.
@@ -61,7 +61,7 @@ It also:
 ## Useful Command
 
 ```bash
-uv run python main.py \
+uv run quiz_pool \
   --db path/to/quiz.json \
   --schema scheme.json \
   --exam-store path/to/generated_exams.json \
