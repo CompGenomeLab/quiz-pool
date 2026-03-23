@@ -307,6 +307,11 @@ textarea {
   transform: translate(-50%, calc(-50% + 18px)) scale(0.985);
 }
 
+.annotate-modal__panel {
+  max-width: min(640px, calc(100vw - 48px));
+  width: min(640px, calc(100vw - 48px));
+}
+
 .detail-modal.is-open {
   pointer-events: auto;
 }
@@ -630,6 +635,10 @@ textarea {
 
 .grading-table {
   min-width: 980px;
+}
+
+.grading-table__row.is-selected td {
+  background: rgba(20, 108, 89, 0.1);
 }
 
 .grading-detail-list {

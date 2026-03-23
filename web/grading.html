@@ -7,6 +7,28 @@
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
+    <div id="annotate-modal" class="detail-modal" aria-hidden="true">
+      <div id="annotate-modal-backdrop" class="detail-modal__backdrop"></div>
+      <section class="detail-modal__panel annotate-modal__panel" role="dialog" aria-modal="true" aria-labelledby="annotate-modal-title">
+        <div class="panel__head">
+          <div>
+            <p class="eyebrow">OMR Annotate</p>
+            <h2 id="annotate-modal-title">Choose Output Folder</h2>
+          </div>
+        </div>
+        <p class="question-detail-sheet__copy">
+          Annotated PDFs will be written into this folder with row-index and student-ID based filenames.
+        </p>
+        <label class="field field--full">
+          <span>Output Folder Path</span>
+          <input id="annotate-output-path" type="text" placeholder="/absolute/path/to/annotated" />
+        </label>
+        <div class="panel__actions">
+          <button id="cancel-annotate-modal" class="button button--ghost" type="button">Cancel</button>
+          <button id="confirm-annotate-modal" class="button button--primary" type="button">Run OMR Annotate</button>
+        </div>
+      </section>
+    </div>
     <div id="grading-busy-overlay" class="busy-overlay hidden" aria-live="polite" aria-busy="true">
       <div class="busy-overlay__card">
         <div class="busy-overlay__spinner" aria-hidden="true"></div>
@@ -151,6 +173,7 @@
                 <div>
                   <p class="eyebrow">Detail</p>
                   <h2>Question-Level Review</h2>
+                  <p class="helper-copy">Click a student row above to inspect the question-level review.</p>
                 </div>
               </div>
               <div id="grading-detail-list" class="grading-detail-list"></div>

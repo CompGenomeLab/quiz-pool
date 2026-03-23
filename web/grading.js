@@ -4,10 +4,12 @@ const state = {
   busyTitle: "",
   dbPath: "",
   examStorePath: "",
+  annotateModalOpen: false,
   isAnnotating: false,
   isGrading: false,
   results: null,
   correctSortDirection: "desc",
+  selectedRowIndex: null,
   statusIsError: false,
   statusMessage: "Loading grading tools...",
   validationErrors: [],
@@ -15,6 +17,11 @@ const state = {
 
 const elements = {
   annotateGradedPdfs: document.querySelector("#annotate-graded-pdfs"),
+  annotateModal: document.querySelector("#annotate-modal"),
+  annotateModalBackdrop: document.querySelector("#annotate-modal-backdrop"),
+  annotateOutputPath: document.querySelector("#annotate-output-path"),
+  cancelAnnotateModal: document.querySelector("#cancel-annotate-modal"),
+  confirmAnnotateModal: document.querySelector("#confirm-annotate-modal"),
   dbPath: document.querySelector("#db-path"),
   errorList: document.querySelector("#grading-error-list"),
   exportGradingCsv: document.querySelector("#export-grading-csv"),
@@ -62,6 +69,29 @@ function setBusyState(isBusy, title = "", message = "") {
     state.isAnnotating = false;
   }
   renderBusyOverlay();
+}
+
+function renderAnnotateModal() {
+  elements.annotateModal.classList.toggle("is-open", state.annotateModalOpen);
+  elements.annotateModal.setAttribute("aria-hidden", String(!state.annotateModalOpen));
+}
+
+function openAnnotateModal() {
+  if (!state.results) {
+    return;
+  }
+  elements.annotateOutputPath.value = defaultAnnotationOutputPath(state.results.inputPath);
+  state.annotateModalOpen = true;
+  renderAnnotateModal();
+  window.setTimeout(() => {
+    elements.annotateOutputPath.focus();
+    elements.annotateOutputPath.select();
+  }, 0);
+}
+
+function closeAnnotateModal() {
+  state.annotateModalOpen = false;
+  renderAnnotateModal();
 }
 
 function escapeHtml(value) {
@@ -208,6 +238,7 @@ function renderSummary() {
   if (!hasResult) {
     elements.gradingTableBody.replaceChildren();
     elements.gradingDetailList.replaceChildren();
+    state.selectedRowIndex = null;
     return;
   }
 
@@ -220,11 +251,22 @@ function renderSummary() {
   elements.gradingMismatchCount.textContent = String(result.summary.mismatchCount);
 
   const tableFragment = document.createDocumentFragment();
-  const detailFragment = document.createDocumentFragment();
   const sortedRows = getSortedRows(result.rows);
+  if (!sortedRows.some((row) => row.rowIndex === state.selectedRowIndex)) {
+    state.selectedRowIndex = sortedRows[0]?.rowIndex ?? null;
+  }
 
   for (const row of sortedRows) {
     const tableRow = document.createElement("tr");
+    tableRow.className = "pool-table__row grading-table__row";
+    if (row.rowIndex === state.selectedRowIndex) {
+      tableRow.classList.add("is-selected");
+    }
+    tableRow.addEventListener("click", () => {
+      state.selectedRowIndex = row.rowIndex;
+      renderSummary();
+    });
+
     for (const value of [
       String(row.rowIndex ?? "—"),
       row.displayStudentId,
@@ -247,71 +289,82 @@ function renderSummary() {
     statusCell.append(badge);
     tableRow.append(statusCell);
     tableFragment.append(tableRow);
-
-    const detail = document.createElement("article");
-    detail.className = "grading-detail-card";
-    const issueMarkup = row.issues.length > 0
-      ? `<ul class="grading-issue-list">${row.issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>`
-      : "<p class=\"helper-copy\">No run-level issues detected.</p>";
-    const questionRows = row.questionDetails.length > 0
-      ? row.questionDetails.map((question) => `
-        <tr>
-          <td>${question.position}</td>
-          <td class="cell-copy">${escapeHtml(question.prompt || "—")}</td>
-          <td>${escapeHtml(question.allowedChoices.join(", ") || "—")}</td>
-          <td>${escapeHtml(question.markedAnswers.join(", ") || "—")}</td>
-          <td>${escapeHtml(question.correctAnswers.join(", ") || "—")}</td>
-          <td>${question.earnedPoints ?? 0}/${question.points ?? 1}</td>
-          <td>${escapeHtml(question.status)}</td>
-          <td class="cell-copy">${escapeHtml(question.issues.join(" ") || "—")}</td>
-        </tr>
-      `).join("")
-      : "<tr><td colspan=\"8\">No question-level data available.</td></tr>";
-
-    detail.innerHTML = `
-      <div class="grading-detail-card__head">
-        <div>
-          <p class="eyebrow">Student ${escapeHtml(row.displayStudentId)}</p>
-          <h3>${escapeHtml(row.sourcePdf || "Unknown Source")}</h3>
-          <p class="grading-detail-card__meta">${escapeHtml(row.examName || "Unknown Exam")} · ${escapeHtml(row.variantId || "No Variant")}</p>
-        </div>
-        <span class="status-badge status-badge--${statusTone(row)}">${escapeHtml(statusLabel(row))}</span>
-      </div>
-      <div class="grading-detail-metrics">
-        <div class="metric"><span class="metric__label">Score</span><span class="metric__value">${row.summary.earnedPoints ?? 0} / ${row.summary.possiblePoints ?? 0}</span></div>
-        <div class="metric"><span class="metric__label">Correct</span><span class="metric__value">${row.summary.correctCount}</span></div>
-        <div class="metric"><span class="metric__label">Incorrect</span><span class="metric__value">${row.summary.incorrectCount}</span></div>
-        <div class="metric"><span class="metric__label">Blank</span><span class="metric__value">${row.summary.blankCount}</span></div>
-        <div class="metric"><span class="metric__label">Missing</span><span class="metric__value">${row.summary.missingCount}</span></div>
-        <div class="metric"><span class="metric__label">Invalid</span><span class="metric__value">${row.summary.invalidCount}</span></div>
-      </div>
-      <div class="grading-detail-card__issues">
-        <h4>Run-Level Checks</h4>
-        ${issueMarkup}
-      </div>
-      <div class="table-wrap">
-        <table class="pool-table grading-question-table">
-          <thead>
-            <tr>
-              <th>Q#</th>
-              <th>Prompt</th>
-              <th>Allowed</th>
-              <th>Marked</th>
-              <th>Correct</th>
-              <th>Points</th>
-              <th>Status</th>
-              <th>Issue</th>
-            </tr>
-          </thead>
-          <tbody>${questionRows}</tbody>
-        </table>
-      </div>
-    `;
-    detailFragment.append(detail);
   }
 
   elements.gradingTableBody.replaceChildren(tableFragment);
-  elements.gradingDetailList.replaceChildren(detailFragment);
+  renderSelectedDetail(sortedRows);
+}
+
+function renderSelectedDetail(rows) {
+  const selectedRow = rows.find((row) => row.rowIndex === state.selectedRowIndex) ?? null;
+  if (!selectedRow) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.innerHTML = "<p>Select a student row to inspect question-level grading details.</p>";
+    elements.gradingDetailList.replaceChildren(empty);
+    return;
+  }
+
+  const detail = document.createElement("article");
+  detail.className = "grading-detail-card";
+  const issueMarkup = selectedRow.issues.length > 0
+    ? `<ul class="grading-issue-list">${selectedRow.issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>`
+    : "<p class=\"helper-copy\">No run-level issues detected.</p>";
+  const questionRows = selectedRow.questionDetails.length > 0
+    ? selectedRow.questionDetails.map((question) => `
+      <tr>
+        <td>${question.position}</td>
+        <td class="cell-copy">${escapeHtml(question.prompt || "—")}</td>
+        <td>${escapeHtml(question.allowedChoices.join(", ") || "—")}</td>
+        <td>${escapeHtml(question.markedAnswers.join(", ") || "—")}</td>
+        <td>${escapeHtml(question.correctAnswers.join(", ") || "—")}</td>
+        <td>${question.earnedPoints ?? 0}/${question.points ?? 1}</td>
+        <td>${escapeHtml(question.status)}</td>
+        <td class="cell-copy">${escapeHtml(question.issues.join(" ") || "—")}</td>
+      </tr>
+    `).join("")
+    : "<tr><td colspan=\"8\">No question-level data available.</td></tr>";
+
+  detail.innerHTML = `
+    <div class="grading-detail-card__head">
+      <div>
+        <p class="eyebrow">Student ${escapeHtml(selectedRow.displayStudentId)}</p>
+        <h3>${escapeHtml(selectedRow.sourcePdf || "Unknown Source")}</h3>
+        <p class="grading-detail-card__meta">${escapeHtml(selectedRow.examName || "Unknown Exam")} · ${escapeHtml(selectedRow.variantId || "No Variant")}</p>
+      </div>
+      <span class="status-badge status-badge--${statusTone(selectedRow)}">${escapeHtml(statusLabel(selectedRow))}</span>
+    </div>
+    <div class="grading-detail-metrics">
+      <div class="metric"><span class="metric__label">Score</span><span class="metric__value">${selectedRow.summary.earnedPoints ?? 0} / ${selectedRow.summary.possiblePoints ?? 0}</span></div>
+      <div class="metric"><span class="metric__label">Correct</span><span class="metric__value">${selectedRow.summary.correctCount}</span></div>
+      <div class="metric"><span class="metric__label">Incorrect</span><span class="metric__value">${selectedRow.summary.incorrectCount}</span></div>
+      <div class="metric"><span class="metric__label">Blank</span><span class="metric__value">${selectedRow.summary.blankCount}</span></div>
+      <div class="metric"><span class="metric__label">Missing</span><span class="metric__value">${selectedRow.summary.missingCount}</span></div>
+      <div class="metric"><span class="metric__label">Invalid</span><span class="metric__value">${selectedRow.summary.invalidCount}</span></div>
+    </div>
+    <div class="grading-detail-card__issues">
+      <h4>Run-Level Checks</h4>
+      ${issueMarkup}
+    </div>
+    <div class="table-wrap">
+      <table class="pool-table grading-question-table">
+        <thead>
+          <tr>
+            <th>Q#</th>
+            <th>Prompt</th>
+            <th>Allowed</th>
+            <th>Marked</th>
+            <th>Correct</th>
+            <th>Points</th>
+            <th>Status</th>
+            <th>Issue</th>
+          </tr>
+        </thead>
+        <tbody>${questionRows}</tbody>
+      </table>
+    </div>
+  `;
+  elements.gradingDetailList.replaceChildren(detail);
 }
 
 async function loadPaths() {
@@ -362,6 +415,7 @@ async function runGrading() {
 
     state.results = payload;
     state.annotationResults = null;
+    state.selectedRowIndex = payload.rows[0]?.rowIndex ?? null;
     state.validationErrors = [];
     renderErrors();
     renderSummary();
@@ -377,17 +431,14 @@ async function annotateGradedPdfs() {
     return;
   }
 
-  const suggestedPath = defaultAnnotationOutputPath(state.results.inputPath);
-  const outputPath = window.prompt("Output folder path for omr-annotate:", suggestedPath);
-  if (outputPath === null) {
-    return;
-  }
-  const trimmedOutputPath = outputPath.trim();
+  const trimmedOutputPath = elements.annotateOutputPath.value.trim();
   if (trimmedOutputPath === "") {
-    setStatus("Annotation cancelled. Output folder path is required.", true);
+    setStatus("Output folder path is required for OMR annotation.", true);
+    elements.annotateOutputPath.focus();
     return;
   }
 
+  closeAnnotateModal();
   state.validationErrors = [];
   renderErrors();
   state.isAnnotating = true;
@@ -430,8 +481,17 @@ async function annotateGradedPdfs() {
 }
 
 function wireEvents() {
-  elements.annotateGradedPdfs.addEventListener("click", async () => {
+  elements.annotateGradedPdfs.addEventListener("click", () => {
+    openAnnotateModal();
+  });
+  elements.cancelAnnotateModal.addEventListener("click", () => {
+    closeAnnotateModal();
+  });
+  elements.confirmAnnotateModal.addEventListener("click", async () => {
     await annotateGradedPdfs();
+  });
+  elements.annotateModalBackdrop.addEventListener("click", () => {
+    closeAnnotateModal();
   });
   elements.runGrading.addEventListener("click", async () => {
     await runGrading();
@@ -443,9 +503,23 @@ function wireEvents() {
     state.correctSortDirection = state.correctSortDirection === "desc" ? "asc" : "desc";
     renderSummary();
   });
+  window.addEventListener("keydown", async (event) => {
+    if (!state.annotateModalOpen) {
+      return;
+    }
+    if (event.key === "Escape") {
+      closeAnnotateModal();
+      return;
+    }
+    if (event.key === "Enter" && document.activeElement === elements.annotateOutputPath) {
+      event.preventDefault();
+      await annotateGradedPdfs();
+    }
+  });
 }
 
 wireEvents();
+renderAnnotateModal();
 loadPaths().catch((error) => {
   console.error(error);
   setStatus(error.message, true);
