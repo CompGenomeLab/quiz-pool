@@ -4,6 +4,7 @@ const state = {
   selectedExamSetId: "",
   selectedExamSet: null,
   selectedVariantId: "",
+  isDeletingExamSet: false,
   isDownloadingPrintableZip: false,
   statusIsError: false,
   statusMessage: "Loading exam sets...",
@@ -16,6 +17,7 @@ const elements = {
   examStorePath: document.querySelector("#exam-store-path"),
   errorList: document.querySelector("#viewer-error-list"),
   errorPanel: document.querySelector("#viewer-errors"),
+  deleteExam: document.querySelector("#viewer-delete-exam"),
   printResults: document.querySelector("#viewer-print-results"),
   results: document.querySelector("#viewer-results"),
   variantList: document.querySelector("#viewer-variant-list"),
@@ -258,7 +260,8 @@ function renderVariantMenu(variants) {
 function renderSelectedExamSet() {
   const hasExamSet = Boolean(state.selectedExamSet);
   elements.results.classList.toggle("hidden", !hasExamSet);
-  elements.printResults.disabled = !hasExamSet || state.isDownloadingPrintableZip;
+  elements.printResults.disabled = !hasExamSet || state.isDownloadingPrintableZip || state.isDeletingExamSet;
+  elements.deleteExam.disabled = !hasExamSet || state.isDownloadingPrintableZip || state.isDeletingExamSet;
   if (!hasExamSet) {
     elements.viewerQuestionPoolBody.replaceChildren();
     elements.variantMenu.replaceChildren();
@@ -319,6 +322,52 @@ async function downloadPrintableZip() {
   setStatus(`Downloaded printable ZIP for exam set ${examSetId}.`);
 }
 
+async function deleteSelectedExamSet() {
+  if (!state.selectedExamSet) {
+    return;
+  }
+
+  const examSetId = state.selectedExamSet.examSet.examSetId;
+  const examName = state.selectedExamSet.summary.printSettings.examName || state.selectedExamSet.summary.quiz.title || examSetId;
+  const confirmed = window.confirm(`Delete exam set "${examName}" (${examSetId}) from the exam store?`);
+  if (!confirmed) {
+    return;
+  }
+
+  state.isDeletingExamSet = true;
+  renderSelectedExamSet();
+  setStatus(`Deleting exam set ${examSetId}...`);
+
+  try {
+    const response = await fetch(`/api/exams/set/${encodeURIComponent(examSetId)}`, {
+      method: "DELETE",
+    });
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const message = payload?.errors?.[0]?.message ?? `Could not delete exam set (${response.status})`;
+      setStatus(message, true);
+      return;
+    }
+
+    state.selectedExamSet = null;
+    state.selectedExamSetId = "";
+    state.selectedVariantId = "";
+    await loadExamSets();
+    setStatus(`Deleted exam set ${examSetId}.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    state.isDeletingExamSet = false;
+    renderSelectedExamSet();
+  }
+}
+
 async function loadExamSets() {
   setStatus("Loading exam sets...");
   const response = await fetch("/api/exams");
@@ -374,6 +423,9 @@ async function loadExamSet(examSetId) {
 function wireEvents() {
   elements.examSetSelect.addEventListener("change", async (event) => {
     await loadExamSet(event.target.value);
+  });
+  elements.deleteExam.addEventListener("click", () => {
+    void deleteSelectedExamSet();
   });
   elements.printResults.addEventListener("click", () => {
     void downloadPrintableZip();

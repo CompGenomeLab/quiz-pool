@@ -158,6 +158,30 @@ def append_exam_set(path: Path, exam_set: dict[str, Any]) -> None:
     write_json_atomic(path, store)
 
 
+def delete_exam_set(path: Path, exam_set_id: str) -> bool:
+    store = load_exam_store(path)
+    exam_sets = store.get("examSets", [])
+    remaining_exam_sets: list[Any] = []
+    deleted = False
+
+    for exam_set in exam_sets:
+        if (
+            not deleted
+            and isinstance(exam_set, dict)
+            and exam_set.get("examSetId") == exam_set_id
+        ):
+            deleted = True
+            continue
+        remaining_exam_sets.append(exam_set)
+
+    if not deleted:
+        return False
+
+    store["examSets"] = remaining_exam_sets
+    write_json_atomic(path, store)
+    return True
+
+
 def find_variant(path: Path, variant_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     store = load_exam_store(path)
     for exam_set in store["examSets"]:
@@ -2397,6 +2421,13 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
+        def do_DELETE(self) -> None:  # noqa: N802
+            parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/exams/set/"):
+                self.handle_delete_exam_set(parsed.path)
+                return
+            self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
+
         def log_message(self, format: str, *args: object) -> None:
             return
 
@@ -2537,6 +2568,27 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     },
                 }
             )
+
+        def handle_delete_exam_set(self, path: str) -> None:
+            exam_set_id = unquote(path.removeprefix("/api/exams/set/")).strip()
+            if not exam_set_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Exam set not found")
+                return
+
+            try:
+                deleted = delete_exam_set(state.exam_store_path, exam_set_id)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<store>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            if not deleted:
+                self.send_error(HTTPStatus.NOT_FOUND, "Exam set not found")
+                return
+
+            self.send_json({"ok": True, "examSetId": exam_set_id})
 
         def handle_get_variant(self, path: str) -> None:
             variant_id = unquote(path.removeprefix("/api/exams/variant/")).strip()
