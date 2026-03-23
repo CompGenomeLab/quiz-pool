@@ -1,7 +1,7 @@
 [project]
 name = "quiz-pool"
 version = "0.1.0"
-description = "Schema-driven quiz authoring, exam generation, OMR printing, and grading."
+description = "Simple, schema-driven quiz authoring, exam generation, OMR printing, and grading."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
