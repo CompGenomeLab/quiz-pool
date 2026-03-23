@@ -52,7 +52,7 @@
       ],
       "bookLocations": [
         {
-          "chapter": "Chapter 1",
+          "chapter": "Chapter 999",
           "section": "World Capitals",
           "page": "4-5",
           "reference": "Overview table of major capitals in Asia."
@@ -1907,6 +1907,41 @@
       "points": 1,
       "difficulty": 1,
       "explanation": ""
+    },
+    {
+      "id": "Q52",
+      "question": "What is this",
+      "choices": [
+        {
+          "key": "A",
+          "text": "a"
+        },
+        {
+          "key": "B",
+          "text": "b"
+        }
+      ],
+      "shuffleChoices": true,
+      "learningObjectiveIds": [
+        "LO1",
+        "LO2",
+        "LO3",
+        "LO5"
+      ],
+      "correctAnswers": [
+        "A"
+      ],
+      "bookLocations": [
+        {
+          "chapter": "",
+          "section": "",
+          "page": "",
+          "reference": ""
+        }
+      ],
+      "points": 1,
+      "difficulty": 1,
+      "explanation": "this question asdkfaslkjdfkajsl"
     }
   ]
 }
