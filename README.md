@@ -1,4 +1,4 @@
-<img src="img/quiz_pool.png" alt="Quiz Pool banner" width="800">
+<img src="img/quiz_pool.png" alt="Quiz Pool">
 
 Schema-driven quiz authoring, exam generation, OMR sheet printing, saved exam viewing, and grading.
 
