@@ -11,3 +11,6 @@ wheels/
 
 # Generated exam runs
 generated_exams.json
+
+# Questions
+chapters/

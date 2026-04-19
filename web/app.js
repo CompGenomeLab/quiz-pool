@@ -1,3 +1,5 @@
+import { renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
+
 const state = {
   dbPath: "",
   isDirty: false,
@@ -37,12 +39,14 @@ const elements = {
   questionEditor: document.querySelector("#question-editor"),
   questionHeading: document.querySelector("#question-heading"),
   questionId: document.querySelector("#question-id"),
+  questionTextPreview: document.querySelector("#question-text-preview"),
   questionPoints: document.querySelector("#question-points"),
   questionList: document.querySelector("#question-list"),
   questionObjectives: document.querySelector("#question-objectives"),
   questionShuffle: document.querySelector("#question-shuffle"),
   questionText: document.querySelector("#question-text"),
   questionExplanation: document.querySelector("#question-explanation"),
+  questionExplanationPreview: document.querySelector("#question-explanation-preview"),
   quizDescription: document.querySelector("#quiz-description"),
   quizTitle: document.querySelector("#quiz-title"),
   reloadQuiz: document.querySelector("#reload-quiz"),
@@ -291,7 +295,7 @@ function renderQuestionList() {
 
     const text = document.createElement("span");
     text.className = "question-tile__text";
-    text.textContent = question.question || "Untitled question";
+    text.textContent = stripRichTextMarkup(question.question) || "Untitled question";
 
     button.append(id, text);
     button.addEventListener("click", () => {
@@ -438,6 +442,11 @@ function renderBookLocations(question) {
   elements.bookLocations.replaceChildren(fragment);
 }
 
+function renderQuestionPreviews(question) {
+  renderRichTextIntoElement(elements.questionTextPreview, question?.question || "—");
+  renderRichTextIntoElement(elements.questionExplanationPreview, question?.explanation || "—");
+}
+
 function renderQuestionEditor() {
   const question = getSelectedQuestion();
   const hasQuestion = Boolean(question);
@@ -452,6 +461,7 @@ function renderQuestionEditor() {
     renderQuestionObjectiveLinks();
     elements.choicesEditor.replaceChildren();
     elements.bookLocations.replaceChildren();
+    renderQuestionPreviews(null);
     return;
   }
 
@@ -468,6 +478,7 @@ function renderQuestionEditor() {
   renderChoices(draft);
   renderQuestionObjectiveLinks();
   renderBookLocations(draft);
+  renderQuestionPreviews(draft);
 }
 
 function renderErrors() {
@@ -648,6 +659,7 @@ function wireGlobalFields() {
       return draft;
     });
     renderQuestionList();
+    renderQuestionPreviews(getSelectedQuestion());
   });
 
   elements.questionExplanation.addEventListener("input", (event) => {
@@ -655,6 +667,7 @@ function wireGlobalFields() {
       draft.explanation = event.target.value;
       return draft;
     });
+    renderQuestionPreviews(getSelectedQuestion());
   });
 
   elements.addObjective.addEventListener("click", () => {

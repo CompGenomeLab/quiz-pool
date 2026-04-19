@@ -9,9 +9,11 @@ import json
 import math
 import mimetypes
 import random
+import re
+import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,7 +24,7 @@ from uuid import uuid4
 import zipfile
 
 from jsonschema import Draft202012Validator
-from omr import SheetConfig, generate_omr_sheet
+from omr import SheetConfig, annotate_pdf, generate_omr_sheet, grade_path
 from pypdf import PdfReader, PdfWriter
 from pyppeteer import launch
 import segno
@@ -38,10 +40,14 @@ DEFAULT_EXAM_STORE_NAME = "generated_exams.json"
 DISPLAY_KEYS = ("A", "B", "C", "D", "E")
 DEFAULT_PRINTABLE_FOLDER = "exam-printables"
 QUESTION_POOL_PRINTABLE_NAME = "question-pool.pdf"
-QUESTION_PAGE_CAPACITY = 38
-MAX_QUESTIONS_PER_EXAM = 50
+LATEX_STUDENT_TEMPLATE = ROOT / "tex_templates" / "exam_template.tex"
+LATEX_QUESTION_POOL_TEMPLATE = ROOT / "tex_templates" / "pool_template.tex"
+LATEX_ENGINES = ("xelatex", "lualatex", "pdflatex")
+LATEX_VARIANT_QR_ASSET_NAME = "variant-qr.pdf"
+QUESTION_PAGE_CAPACITY = 130
+MAX_QUESTIONS_PER_EXAM = 100
 DEFAULT_OMR_INSTRUCTIONS = (
-    "Fully fill the bubbles. Do not leave any student ID column blank."
+    "Fully fill bubbles. Do not leave any Student ID field blank. Include leading zeros."
 )
 DEFAULT_EXAM_RULES = [
     DEFAULT_OMR_INSTRUCTIONS,
@@ -51,6 +57,19 @@ DEFAULT_EXAM_RULES = [
     "Remain seated until instructed to stop and submit your paper.",
 ]
 GRADE_ALLOWED_LABELS = set(DISPLAY_KEYS)
+MATH_TAG_PATTERN = re.compile(r"\[math\]([\s\S]*?)\[/math\]", re.IGNORECASE)
+LATEX_TEXT_ESCAPES = {
+    "\\": r"\textbackslash{}",
+    "{": r"\{",
+    "}": r"\}",
+    "#": r"\#",
+    "$": r"\$",
+    "%": r"\%",
+    "&": r"\&",
+    "_": r"\_",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
 
 
 def default_exam_rules(omr_instructions: str = DEFAULT_OMR_INSTRUCTIONS) -> list[str]:
@@ -217,6 +236,433 @@ def dedupe_preserve_order(items: list[Any]) -> list[Any]:
         seen.add(item)
         deduped.append(item)
     return deduped
+
+
+def load_web_text_asset(name: str) -> str:
+    return (WEB_ROOT / name).read_text(encoding="utf-8")
+
+
+def render_rich_text_css() -> str:
+    return """
+      .qp-math {
+        align-items: flex-end;
+        display: inline-flex;
+        margin: 0 0.08em;
+        max-width: 100%;
+        vertical-align: -0.08em;
+        white-space: nowrap;
+      }
+
+      .qp-mrow {
+        align-items: flex-end;
+        display: inline-flex;
+        gap: 0.04em;
+        white-space: nowrap;
+      }
+
+      .qp-mi,
+      .qp-mn,
+      .qp-mo,
+      .qp-mtext,
+      .qp-script__base,
+      .qp-script__sup,
+      .qp-script__sub,
+      .qp-frac__top,
+      .qp-frac__bottom,
+      .qp-root__index,
+      .qp-root__radical,
+      .qp-root__body {
+        line-height: 1;
+      }
+
+      .qp-mi {
+        font-style: italic;
+      }
+
+      .qp-mi--normal,
+      .qp-mtext {
+        font-style: normal;
+      }
+
+      .qp-mspace {
+        display: inline-block;
+        width: var(--qp-space-width, 0.2em);
+      }
+
+      .qp-accent {
+        align-items: center;
+        display: inline-flex;
+        flex-direction: column;
+        margin: 0 0.03em;
+        white-space: nowrap;
+      }
+
+      .qp-accent__glyph,
+      .qp-accent__body {
+        line-height: 1;
+      }
+
+      .qp-accent__glyph {
+        display: block;
+      }
+
+      .qp-accent--bar .qp-accent__glyph {
+        border-top: 1px solid currentColor;
+        margin-bottom: 0.08em;
+        min-width: 100%;
+        width: 100%;
+      }
+
+      .qp-accent--glyph .qp-accent__glyph {
+        font-size: 0.68em;
+        margin-bottom: -0.08em;
+        transform: translateY(0.06em) scaleX(1.08);
+      }
+
+      .qp-script {
+        align-items: baseline;
+        display: inline-flex;
+        white-space: nowrap;
+      }
+
+      .qp-script--sup,
+      .qp-script--sub {
+        gap: 0.05em;
+      }
+
+      .qp-script__sup,
+      .qp-script__sub {
+        display: inline-block;
+        font-size: 0.68em;
+      }
+
+      .qp-script--sup .qp-script__sup {
+        transform: translateY(-0.45em);
+      }
+
+      .qp-script--sub .qp-script__sub {
+        transform: translateY(0.4em);
+      }
+
+      .qp-script__stack {
+        display: inline-flex;
+        flex-direction: column;
+        margin-left: 0.05em;
+      }
+
+      .qp-script__stack .qp-script__sup {
+        transform: translateY(-0.08em);
+      }
+
+      .qp-script__stack .qp-script__sub {
+        transform: translateY(0.14em);
+      }
+
+      .qp-frac {
+        align-items: center;
+        display: inline-flex;
+        flex-direction: column;
+        justify-content: center;
+        margin: 0 0.08em;
+        vertical-align: middle;
+      }
+
+      .qp-frac__top,
+      .qp-frac__bottom {
+        display: block;
+        font-size: 0.82em;
+        padding: 0 0.14em;
+      }
+
+      .qp-frac__bar {
+        border-top: 1px solid currentColor;
+        display: block;
+        margin: 0.06em 0 0.04em;
+        min-width: 100%;
+        width: 100%;
+      }
+
+      .qp-root {
+        align-items: flex-end;
+        display: inline-flex;
+        margin: 0 0.04em;
+        white-space: nowrap;
+      }
+
+      .qp-root__index {
+        font-size: 0.56em;
+        margin-right: 0.02em;
+        transform: translateY(-0.52em);
+      }
+
+      .qp-root__radical {
+        font-size: 1.15em;
+      }
+
+      .qp-root__body {
+        border-top: 1px solid currentColor;
+        margin-left: -0.05em;
+        padding: 0.08em 0 0 0.14em;
+      }
+
+      .qp-math__source {
+        font-family: "Courier New", monospace;
+        font-size: 0.92em;
+      }
+
+      .qp-math[data-qp-math-state="pending"] .qp-math__source,
+      .qp-math[data-qp-math-state="rendering"] .qp-math__source {
+        opacity: 0.68;
+      }
+
+      .qp-math mjx-container[jax="SVG"] {
+        display: inline-block !important;
+        margin: 0 !important;
+        max-width: 100%;
+      }
+
+      .qp-math mjx-container[jax="SVG"] > svg {
+        display: block;
+        max-width: 100%;
+        overflow: visible;
+      }
+
+      .qp-math--error {
+        background: rgba(201, 106, 106, 0.08);
+        border: 1px solid rgba(159, 77, 77, 0.18);
+        border-radius: 10px;
+        font-family: "Courier New", monospace;
+        font-size: 0.92em;
+        padding: 0.16em 0.4em;
+      }
+"""
+
+
+def render_inline_rich_text_module(script_body: str) -> str:
+    return f"""
+    <script type="module">
+{load_web_text_asset("rich-text.js")}
+{script_body}
+    </script>
+"""
+
+
+def strip_math_markup(value: Any) -> str:
+    text = str(value or "")
+    without_tags = MATH_TAG_PATTERN.sub(
+        lambda match: f" {match.group(1).strip()} ",
+        text,
+    )
+    return " ".join(without_tags.split())
+
+
+def latex_escape_text_segment(value: Any, *, preserve_linebreaks: bool = True) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not preserve_linebreaks:
+        text = re.sub(r"\s+", " ", text)
+    escaped = "".join(LATEX_TEXT_ESCAPES.get(character, character) for character in text)
+    if preserve_linebreaks:
+        escaped = escaped.replace("\n", r"\newline ")
+    return escaped
+
+
+def render_rich_text_latex(value: Any, *, preserve_linebreaks: bool = True) -> str:
+    source = str(value or "")
+    if not source:
+        return ""
+
+    cursor = 0
+    parts: list[str] = []
+    for match in MATH_TAG_PATTERN.finditer(source):
+        start = match.start()
+        parts.append(
+            latex_escape_text_segment(
+                source[cursor:start],
+                preserve_linebreaks=preserve_linebreaks,
+            )
+        )
+        expression = (match.group(1) or "").strip()
+        if expression:
+            parts.append(rf"\({expression}\)")
+        cursor = match.end()
+
+    parts.append(
+        latex_escape_text_segment(
+            source[cursor:],
+            preserve_linebreaks=preserve_linebreaks,
+        )
+    )
+    return "".join(parts)
+
+
+def render_latex_text_or_dash(
+    value: Any,
+    *,
+    preserve_linebreaks: bool = False,
+    fallback: str = "—",
+) -> str:
+    if strip_math_markup(value).strip():
+        return (
+            render_rich_text_latex(value, preserve_linebreaks=preserve_linebreaks).strip()
+            or latex_escape_text_segment(fallback, preserve_linebreaks=False)
+        )
+    return latex_escape_text_segment(fallback, preserve_linebreaks=False)
+
+
+def latex_placeholder_value(value: Any, *, preserve_linebreaks: bool = False) -> str:
+    return render_latex_text_or_dash(value, preserve_linebreaks=preserve_linebreaks)
+
+
+def latex_placeholder_value_or_blank(value: Any, *, preserve_linebreaks: bool = False) -> str:
+    if strip_math_markup(value).strip():
+        return render_rich_text_latex(value, preserve_linebreaks=preserve_linebreaks).strip()
+    return ""
+
+
+def render_latex_rules(rules: list[Any]) -> str:
+    rendered_rules = []
+    for rule in rules:
+        content = render_rich_text_latex(rule, preserve_linebreaks=False).strip()
+        if content:
+            rendered_rules.append(f"  \\item {content}")
+    return "\n".join(rendered_rules)
+
+
+def render_latex_choice_rows(choices: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for index in range(0, len(choices), 2):
+        left = choices[index] if index < len(choices) else None
+        right = choices[index + 1] if index + 1 < len(choices) else None
+
+        left_cell = "~"
+        if isinstance(left, dict):
+            left_cell = (
+                f"\\textbf{{{latex_escape_text_segment(left.get('key', ''), preserve_linebreaks=False)}.}} "
+                + render_rich_text_latex(left.get("text", ""), preserve_linebreaks=True)
+            ).strip()
+
+        right_cell = "~"
+        if isinstance(right, dict):
+            right_cell = (
+                f"\\textbf{{{latex_escape_text_segment(right.get('key', ''), preserve_linebreaks=False)}.}} "
+                + render_rich_text_latex(right.get("text", ""), preserve_linebreaks=True)
+            ).strip()
+
+        rows.append(f"{left_cell} & {right_cell}")
+
+    return " \\\\\n".join(rows)
+
+
+def render_student_template_choice_rows(choices: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        key = latex_escape_text_segment(choice.get("key", ""), preserve_linebreaks=False)
+        text = render_rich_text_latex(choice.get("text", ""), preserve_linebreaks=True).strip() or "~"
+        rows.append(f"{key}. & {text}")
+    return " \\\\\n      ".join(rows) or "~ & ~"
+
+
+def variant_question_heading(variant: dict[str, Any]) -> str:
+    questions = [question for question in variant.get("questions", []) if isinstance(question, dict)]
+    if not questions:
+        return "Answer each question."
+
+    has_multiple_correct = any(
+        len(
+            [
+                answer
+                for answer in question.get("sourceCorrectAnswers", question.get("displayCorrectAnswers", []))
+                if isinstance(answer, str) and answer.strip()
+            ]
+        ) > 1
+        for question in questions
+    )
+    if has_multiple_correct:
+        return "Choose all correct answers for each question."
+    return "Choose the single best answer for each question."
+
+
+def render_student_question_blocks_latex(variant: dict[str, Any]) -> str:
+    blocks: list[str] = []
+    for question in variant.get("questions", []):
+        if not isinstance(question, dict):
+            continue
+        choices = [
+            choice
+            for choice in question.get("displayChoices", [])
+            if isinstance(choice, dict)
+        ]
+        choice_rows = render_student_template_choice_rows(choices)
+        prompt = render_rich_text_latex(question.get("question", ""), preserve_linebreaks=True).strip() or "—"
+        blocks.append(
+            "\n".join(
+                [
+                    r"\mcqitem",
+                    rf"  {{{prompt}}}",
+                    rf"  {{{choice_rows}}}",
+                ]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def render_question_pool_blocks_latex(question_pool: list[dict[str, Any]]) -> str:
+    blocks: list[str] = []
+    for question in question_pool:
+        if not isinstance(question, dict):
+            continue
+        chapters = ", ".join(str(chapter).strip() for chapter in question.get("chapters", []) if str(chapter).strip()) or "—"
+        correct_answers = ", ".join(
+            str(answer).strip() for answer in question.get("sourceCorrectAnswers", []) if str(answer).strip()
+        ) or "—"
+        objectives = ", ".join(
+            str(objective.get("label") or objective.get("id") or "").strip()
+            for objective in question.get("learningObjectives", [])
+            if isinstance(objective, dict) and str(objective.get("label") or objective.get("id") or "").strip()
+        ) or "—"
+        prompt = render_rich_text_latex(question.get("question", ""), preserve_linebreaks=True).strip() or "—"
+        choices = [
+            choice
+            for choice in question.get("choices", [])
+            if isinstance(choice, dict)
+        ]
+        meta_bits = [
+            latex_escape_text_segment(str(question.get("sourceQuestionId") or "—"), preserve_linebreaks=False),
+            f"Difficulty {int(question.get('difficulty') or 0)}",
+            f"{int(question.get('points') or 1)} pt",
+            f"Chapters: {latex_escape_text_segment(chapters, preserve_linebreaks=False)}",
+        ]
+        blocks.append(
+            "\n".join(
+                [
+                    r"\item",
+                    rf"  {{\small\textbf{{{' \\textbullet{} '.join(meta_bits)}}}}}\par",
+                    f"  {prompt}",
+                    r"  \vspace{0.2em}",
+                    r"  {\renewcommand{\arraystretch}{1.12}%",
+                    r"  \begin{tabularx}{\linewidth}{@{}YY@{}}",
+                    "  " + (render_latex_choice_rows(choices) or "~ & ~"),
+                    r"  \end{tabularx}}",
+                    (
+                        r"  {\small\textbf{Correct:} "
+                        + latex_escape_text_segment(correct_answers, preserve_linebreaks=False)
+                        + r"\quad\textbf{Objectives:} "
+                        + latex_escape_text_segment(objectives, preserve_linebreaks=False)
+                        + "}"
+                    ),
+                ]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def apply_latex_template(template_path: Path, replacements: dict[str, str]) -> str:
+    content = template_path.read_text(encoding="utf-8")
+    for placeholder, value in replacements.items():
+        content = content.replace(placeholder, value)
+    return content
 
 
 def build_question_index(
@@ -403,6 +849,8 @@ def normalize_generation_request(
     exam_date = normalize_optional_string(payload, "examDate", errors)
     start_time = normalize_optional_string(payload, "startTime", errors)
     total_time_minutes = normalize_optional_positive_int(payload, "totalTimeMinutes", errors)
+    instructor = normalize_optional_string(payload, "instructor", errors)
+    allowed_materials = normalize_optional_string(payload, "allowedMaterials", errors)
     omr_instructions = normalize_optional_string(payload, "omrInstructions", errors)
     exam_rules = normalize_rule_list(payload, "examRules", errors)
 
@@ -463,6 +911,8 @@ def normalize_generation_request(
             "examDate": exam_date,
             "startTime": start_time,
             "totalTimeMinutes": total_time_minutes,
+            "instructor": instructor,
+            "allowedMaterials": allowed_materials,
             "omrInstructions": omr_instructions,
             "examRules": exam_rules,
         },
@@ -500,39 +950,26 @@ def normalize_annotation_request(payload: Any) -> tuple[dict[str, Any] | None, l
 
 
 def run_omr_grade(input_path: Path) -> list[dict[str, Any]]:
-    command = ["uv", "run", "omr-grade", str(input_path)]
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        payload = grade_path(input_path)
+    except Exception as error:
+        if input_path.is_file():
+            return [
+                {
+                    "source_pdf": input_path.name,
+                    "qr_data": None,
+                    "student_id": "",
+                    "marked_answers": {},
+                    "omr_error": str(error),
+                }
+            ]
+        raise ValueError(str(error)) from error
 
-    if completed.returncode == 0:
-        try:
-            payload = json.loads(completed.stdout)
-        except json.JSONDecodeError as error:
-            raise ValueError(f"omr-grade returned invalid JSON: {error.msg}") from error
-        if isinstance(payload, list):
-            return [item for item in payload if isinstance(item, dict)]
-        if isinstance(payload, dict):
-            source_name = input_path.name if input_path.is_file() else str(input_path)
-            return [{"source_pdf": source_name, **payload}]
-        raise ValueError("omr-grade returned an unsupported JSON payload")
+    if isinstance(payload, list):
+        return [asdict(item) for item in payload]
 
-    error_text = completed.stderr.strip() or completed.stdout.strip() or f"omr-grade failed with exit code {completed.returncode}"
-    if input_path.is_file():
-        return [
-            {
-                "source_pdf": input_path.name,
-                "qr_data": None,
-                "student_id": "",
-                "marked_answers": {},
-                "omr_error": error_text,
-            }
-        ]
-    raise ValueError(error_text)
+    source_name = input_path.name if input_path.is_file() else str(input_path)
+    return [{"source_pdf": source_name, **asdict(payload)}]
 
 
 def run_omr_annotate(
@@ -541,28 +978,16 @@ def run_omr_annotate(
     *,
     correct_answers: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
-    command = ["uv", "run", "omr-annotate", str(input_path), "--output", str(output_path)]
-    if correct_answers:
-        command.extend(["--correct-answers", json.dumps(correct_answers, separators=(",", ":"))])
-
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if completed.returncode != 0:
-        error_text = completed.stderr.strip() or completed.stdout.strip() or f"omr-annotate failed with exit code {completed.returncode}"
-        raise ValueError(error_text)
-
     try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError as error:
-        raise ValueError(f"omr-annotate returned invalid JSON: {error.msg}") from error
-    if not isinstance(payload, dict):
-        raise ValueError("omr-annotate returned an unsupported JSON payload")
-    return payload
+        return asdict(
+            annotate_pdf(
+                input_path,
+                output_path,
+                correct_answers=correct_answers,
+            )
+        )
+    except Exception as error:
+        raise ValueError(str(error)) from error
 
 
 def normalize_marked_answers(raw_value: Any) -> dict[str, list[str]]:
@@ -584,6 +1009,10 @@ def normalize_marked_answers(raw_value: Any) -> dict[str, list[str]]:
                     labels.append(label)
         normalized[key] = dedupe_preserve_order(labels)
     return normalized
+
+
+def earns_full_credit(marked: list[str], correct: list[str]) -> bool:
+    return bool(marked) and set(marked) == set(correct)
 
 
 def build_variant_lookup(store: dict[str, Any]) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
@@ -704,7 +1133,7 @@ def analyze_grade_result(
                 elif not marked:
                     status = "blank"
                     summary["blankCount"] += 1
-                elif set(marked) == set(correct):
+                elif earns_full_credit(marked, correct):
                     status = "correct"
                     summary["correctCount"] += 1
                     earned_points = points
@@ -992,6 +1421,8 @@ def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
     exam_date = raw.get("examDate")
     start_time = raw.get("startTime")
     total_time_minutes = raw.get("totalTimeMinutes")
+    instructor = raw.get("instructor")
+    allowed_materials = raw.get("allowedMaterials")
     omr_instructions = raw.get("omrInstructions")
     exam_rules = raw.get("examRules")
 
@@ -1000,6 +1431,10 @@ def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
     normalized_course_name = course_name.strip() if isinstance(course_name, str) else ""
     normalized_exam_date = exam_date.strip() if isinstance(exam_date, str) else ""
     normalized_start_time = start_time.strip() if isinstance(start_time, str) else ""
+    normalized_instructor = instructor.strip() if isinstance(instructor, str) else ""
+    normalized_allowed_materials = (
+        allowed_materials.strip() if isinstance(allowed_materials, str) else ""
+    )
     normalized_total_time = ""
     if isinstance(total_time_minutes, int) and total_time_minutes > 0:
         normalized_total_time = str(total_time_minutes)
@@ -1029,6 +1464,8 @@ def get_print_settings(exam_set: dict[str, Any]) -> dict[str, Any]:
         "examDate": normalized_exam_date,
         "startTime": normalized_start_time,
         "totalTimeMinutes": normalized_total_time,
+        "instructor": normalized_instructor,
+        "allowedMaterials": normalized_allowed_materials,
         "omrInstructions": normalized_omr_instructions,
         "examRules": normalized_rules,
     }
@@ -1129,8 +1566,15 @@ def render_variant_qr_svg(exam_set_id: str, variant_id: str) -> str:
     return qr_code.svg_inline(scale=5, border=2, omitsize=True)
 
 
+def build_variant_qr_pdf_bytes(exam_set_id: str, variant_id: str) -> bytes:
+    qr_code = segno.make(build_variant_qr_payload(exam_set_id, variant_id))
+    buffer = io.BytesIO()
+    qr_code.save(buffer, kind="pdf", scale=3, border=2)
+    return buffer.getvalue()
+
+
 def estimate_wrapped_line_count(text: str, chars_per_line: int) -> int:
-    normalized = " ".join(str(text).split())
+    normalized = strip_math_markup(text)
     if not normalized:
         return 1
     return max(1, math.ceil(len(normalized) / chars_per_line))
@@ -1274,6 +1718,8 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
             "examDate": request["examDate"],
             "startTime": request["startTime"],
             "totalTimeMinutes": request["totalTimeMinutes"],
+            "instructor": request["instructor"],
+            "allowedMaterials": request["allowedMaterials"],
             "omrInstructions": request["omrInstructions"],
             "examRules": request["examRules"],
         },
@@ -1319,6 +1765,200 @@ def get_question_pool_for_export(state: AppState, exam_set: dict[str, Any]) -> l
             continue
         rebuilt_pool.append(build_question_pool_entry(question, objective_labels))
     return rebuilt_pool
+
+
+def variant_label_for_print(variant: dict[str, Any]) -> str:
+    ordinal = int(variant.get("printableOrdinal") or 0)
+    if ordinal > 0:
+        width = max(2, len(str(ordinal)))
+        return f"Variant {ordinal:0{width}d}"
+    return str(variant.get("printableFileName") or variant.get("variantId") or "Variant")
+
+
+def build_student_latex_document(exam_set: dict[str, Any], variant: dict[str, Any]) -> str:
+    print_settings = get_print_settings(exam_set)
+    total_points = sum(int(question.get("points") or 1) for question in variant.get("questions", []))
+    distinct_points = sorted(
+        {
+            int(question.get("points") or 1)
+            for question in variant.get("questions", [])
+            if isinstance(question, dict)
+        }
+    )
+    if len(distinct_points) == 1:
+        points_per_question = str(distinct_points[0])
+    else:
+        points_per_question = "Varies"
+
+    total_time = str(print_settings["totalTimeMinutes"]).strip()
+    if total_time:
+        total_time = f"{total_time} minutes"
+
+    replacements = {
+        "%%QUIZPOOL_INSTITUTION%%": latex_placeholder_value_or_blank(print_settings["institutionName"]),
+        "%%QUIZPOOL_DEPARTMENT%%": "",
+        "%%QUIZPOOL_COURSE%%": latex_placeholder_value_or_blank(print_settings["courseName"]),
+        "%%QUIZPOOL_EXAM_NAME%%": latex_placeholder_value_or_blank(print_settings["examName"]),
+        "%%QUIZPOOL_SEMESTER%%": "",
+        "%%QUIZPOOL_EXAM_DATE%%": latex_placeholder_value_or_blank(print_settings["examDate"]),
+        "%%QUIZPOOL_TOTAL_TIME%%": latex_placeholder_value_or_blank(total_time),
+        "%%QUIZPOOL_QUESTION_COUNT%%": latex_escape_text_segment(
+            str(len(variant.get("questions", []))),
+            preserve_linebreaks=False,
+        ),
+        "%%QUIZPOOL_TOTAL_POINTS%%": latex_escape_text_segment(
+            str(total_points),
+            preserve_linebreaks=False,
+        ),
+        "%%QUIZPOOL_INSTRUCTOR%%": latex_placeholder_value_or_blank(
+            print_settings["instructor"]
+        ),
+        "%%QUIZPOOL_ALLOWED_MATERIALS%%": latex_placeholder_value_or_blank(
+            print_settings["allowedMaterials"]
+        ),
+        "%%QUIZPOOL_POINTS_PER_QUESTION%%": latex_escape_text_segment(
+            points_per_question,
+            preserve_linebreaks=False,
+        ),
+        "%%QUIZPOOL_RULES%%": render_latex_rules(print_settings["examRules"]),
+        "%%QUIZPOOL_QUESTION_HEADING%%": latex_escape_text_segment(
+            variant_question_heading(variant),
+            preserve_linebreaks=False,
+        ),
+        "%%QUIZPOOL_PAGE_QR%%": rf"\includegraphics[width=0.42in]{{{LATEX_VARIANT_QR_ASSET_NAME}}}",
+        "%%QUIZPOOL_QUESTION_BLOCKS%%": render_student_question_blocks_latex(variant),
+    }
+    return apply_latex_template(LATEX_STUDENT_TEMPLATE, replacements)
+
+
+def build_student_latex_assets(exam_set: dict[str, Any], variant: dict[str, Any]) -> dict[str, bytes]:
+    exam_set_id = str(exam_set.get("examSetId") or "").strip()
+    variant_id = str(variant.get("variantId") or "").strip()
+    if not exam_set_id or not variant_id:
+        return {}
+    return {
+        LATEX_VARIANT_QR_ASSET_NAME: build_variant_qr_pdf_bytes(exam_set_id, variant_id),
+    }
+
+
+def build_question_pool_latex_document(
+    exam_set: dict[str, Any],
+    question_pool: list[dict[str, Any]],
+) -> str:
+    print_settings = get_print_settings(exam_set)
+    replacements = {
+        "%%QUIZPOOL_INSTITUTION%%": latex_placeholder_value(print_settings["institutionName"]),
+        "%%QUIZPOOL_EXAM_NAME%%": latex_placeholder_value(print_settings["examName"]),
+        "%%QUIZPOOL_COURSE%%": latex_placeholder_value(print_settings["courseName"]),
+        "%%QUIZPOOL_EXAM_DATE%%": latex_placeholder_value(print_settings["examDate"]),
+        "%%QUIZPOOL_INSTRUCTOR%%": latex_placeholder_value_or_blank(
+            print_settings["instructor"]
+        ),
+        "%%QUIZPOOL_ALLOWED_MATERIALS%%": latex_placeholder_value_or_blank(
+            print_settings["allowedMaterials"]
+        ),
+        "%%QUIZPOOL_EXAM_SET_ID%%": latex_placeholder_value(exam_set.get("examSetId")),
+        "%%QUIZPOOL_SELECTED_COUNT%%": latex_escape_text_segment(
+            str(len(question_pool)),
+            preserve_linebreaks=False,
+        ),
+        "%%QUIZPOOL_QUESTION_BLOCKS%%": render_question_pool_blocks_latex(question_pool),
+    }
+    return apply_latex_template(LATEX_QUESTION_POOL_TEMPLATE, replacements)
+
+
+def summarize_latex_failure(output: str) -> str:
+    lines: list[str] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("!") or "Error" in stripped or "Emergency stop" in stripped:
+            lines.append(stripped)
+    if lines:
+        return "; ".join(dedupe_preserve_order(lines)[:8])
+    condensed = " ".join(output.split())
+    return condensed[-800:] if condensed else "No LaTeX engine output was captured."
+
+
+def latex_engine_candidates() -> list[str]:
+    return [engine for engine in LATEX_ENGINES if shutil.which(engine)]
+
+
+def compile_latex_with_engine(
+    tex_content: str,
+    *,
+    job_name: str,
+    engine: str,
+    assets: dict[str, bytes] | None = None,
+) -> bytes:
+    try:
+        with tempfile.TemporaryDirectory(prefix="quiz-pool-latex-") as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            tex_path = temp_dir / f"{job_name}.tex"
+            pdf_path = temp_dir / f"{job_name}.pdf"
+            log_path = temp_dir / f"{job_name}.log"
+            tex_path.write_text(tex_content, encoding="utf-8")
+            for asset_name, asset_bytes in (assets or {}).items():
+                (temp_dir / asset_name).write_bytes(asset_bytes)
+
+            command = [
+                engine,
+                "-interaction=nonstopmode",
+                "-halt-on-error",
+                "-no-shell-escape",
+                f"-jobname={job_name}",
+                tex_path.name,
+            ]
+            for _ in range(2):
+                completed = subprocess.run(
+                    command,
+                    cwd=temp_dir,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if completed.returncode != 0:
+                    log_output = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+                    detail = summarize_latex_failure(
+                        "\n".join(part for part in [completed.stdout, completed.stderr, log_output] if part)
+                    )
+                    raise ValueError(f"LaTeX compilation failed with {engine}: {detail}")
+
+            if not pdf_path.exists():
+                raise ValueError(f"LaTeX compilation with {engine} finished without producing a PDF.")
+            return pdf_path.read_bytes()
+    except FileNotFoundError as error:
+        raise OSError(f"{engine} was not found in PATH.") from error
+
+
+def render_latex_to_pdf(
+    tex_content: str,
+    *,
+    job_name: str,
+    assets: dict[str, bytes] | None = None,
+) -> bytes:
+    engines = latex_engine_candidates()
+    if not engines:
+        raise OSError(
+            "No LaTeX engine was found in PATH. Install TeX Live or another LaTeX distribution."
+        )
+
+    failures: list[str] = []
+    for engine in engines:
+        try:
+            return compile_latex_with_engine(
+                tex_content,
+                job_name=job_name,
+                engine=engine,
+                assets=assets,
+            )
+        except ValueError as error:
+            failures.append(str(error))
+            continue
+
+    detail = "; ".join(failures)
+    raise ValueError(detail or "LaTeX compilation failed for all available engines.")
 
 
 def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
@@ -1442,6 +2082,8 @@ def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
         background: rgba(20, 108, 89, 0.07);
       }}
 
+{render_rich_text_css()}
+
       @media print {{
         body {{
           background: #fff;
@@ -1465,6 +2107,22 @@ def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
       <p class="subtitle">{escaped_subtitle}</p>
       {body_html}
     </article>
+{render_inline_rich_text_module("""
+      window.__quizPoolPrintableReady = false;
+
+      function renderPrintableRichText() {
+        renderRichTextTargets(document);
+        window.__quizPoolPrintableReady = true;
+      }
+
+      if (document.readyState === "loading") {
+        window.addEventListener("DOMContentLoaded", renderPrintableRichText, { once: true });
+      } else {
+        renderPrintableRichText();
+      }
+
+      window.addEventListener("load", renderPrintableRichText, { once: true });
+""")}
   </body>
 </html>
 """
@@ -1506,7 +2164,12 @@ def render_question_pool_html(exam_set: dict[str, Any], question_pool: list[dict
     question_sections: list[str] = []
     for index, question in enumerate(question_pool, start=1):
         choices = "".join(
-            f"<li>{html.escape(choice['key'])}. {html.escape(choice['text'])}</li>"
+            (
+                "<li>"
+                f"<span>{html.escape(choice['key'])}.</span> "
+                f"<span data-rich-text>{html.escape(choice['text'])}</span>"
+                "</li>"
+            )
             for choice in question["choices"]
         )
         chapters = ", ".join(question["chapters"]) or "—"
@@ -1514,7 +2177,7 @@ def render_question_pool_html(exam_set: dict[str, Any], question_pool: list[dict
             f"""
 <section class="question">
   <div class="question-head">Question {index} · {html.escape(question['sourceQuestionId'])} · Difficulty {question['difficulty']} · {question['points']} pt · Chapters {html.escape(chapters)}</div>
-  <p class="question-title">{html.escape(question['question'])}</p>
+  <p class="question-title" data-rich-text>{html.escape(question['question'])}</p>
   <ul class="choice-list">{choices}</ul>
 </section>
 """
@@ -1781,45 +2444,47 @@ def render_student_print_css() -> str:
       .question-stack {
         display: flex;
         flex-direction: column;
-        gap: 4.8mm;
+        gap: 3.2mm;
       }
 
       .question-block {
-        border: 0.3mm solid var(--border);
+        border: 0.2mm solid var(--border);
         break-inside: avoid;
         page-break-inside: avoid;
-        padding: 4.2mm 4.6mm;
+        padding: 2.8mm 3.2mm;
+      }
+
+      .question-block__prompt {
+        font-size: 10.6pt;
+        line-height: 1.38;
+        margin: 0;
       }
 
       .question-block__number {
-        font-size: 10pt;
+        font-size: 0.94em;
         font-weight: 700;
-        margin: 0 0 2.2mm;
-        text-transform: uppercase;
+        margin-right: 1.6mm;
       }
 
       .question-block__text {
-        font-size: 11pt;
-        line-height: 1.45;
-        margin: 0;
+        font-size: 1em;
       }
 
       .choice-list {
         display: flex;
         flex-direction: column;
-        gap: 2.4mm;
+        gap: 1.2mm;
         list-style: none;
-        margin: 4mm 0 0;
+        margin: 2.4mm 0 0;
         padding: 0;
       }
 
       .choice-list li {
         align-items: start;
-        border: 0.2mm solid #888888;
         display: grid;
-        gap: 3mm;
-        grid-template-columns: 7mm minmax(0, 1fr);
-        padding: 2.6mm 3mm;
+        gap: 1.8mm;
+        grid-template-columns: 5mm minmax(0, 1fr);
+        padding: 0;
       }
 
       .choice-key {
@@ -1830,82 +2495,82 @@ def render_student_print_css() -> str:
         line-height: 1.4;
       }
 
+""" + render_rich_text_css() + """
+
       .sheet-page--question {
-        padding: 11mm 14mm 10mm;
+        padding: 8mm 10mm 8mm;
       }
 
       .sheet-page--question .sheet-header {
-        gap: 3mm;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr) 19mm;
+        gap: 2.2mm;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) 16mm;
       }
 
       .sheet-page--question .sheet-header__institution,
       .sheet-page--question .sheet-header__title {
-        min-height: 19mm;
+        min-height: 16mm;
       }
 
       .sheet-page--question .sheet-header__institution {
-        font-size: 8.4pt;
-        line-height: 1.25;
-        padding-top: 0.8mm;
+        font-size: 7.7pt;
+        line-height: 1.16;
+        padding-top: 0.5mm;
       }
 
       .sheet-page--question .sheet-header__title {
-        font-size: 11.5pt;
+        font-size: 10.5pt;
         letter-spacing: 0.02em;
-        line-height: 1.15;
-        padding: 0 2mm;
+        line-height: 1.08;
+        padding: 0 1.2mm;
       }
 
       .sheet-page--question .sheet-header__qr {
-        height: 19mm;
-        padding: 0.8mm;
-        width: 19mm;
+        height: 16mm;
+        padding: 0.6mm;
+        width: 16mm;
       }
 
       .sheet-page--question .sheet-header-rule {
-        margin: 2mm 0 3mm;
+        margin: 1.5mm 0 2mm;
       }
 
       .sheet-page--question .sheet-footer {
-        font-size: 8pt;
-        margin-top: 3.5mm;
-        padding-top: 2mm;
+        font-size: 7.2pt;
+        margin-top: 2mm;
+        padding-top: 1.2mm;
       }
 
       .sheet-page--question .question-stack {
-        gap: 2.4mm;
+        gap: 1.6mm;
       }
 
       .sheet-page--question .question-block {
-        padding: 2.6mm 3mm;
+        padding: 1.7mm 2mm;
+      }
+
+      .sheet-page--question .question-block__prompt {
+        font-size: 9.35pt;
+        line-height: 1.2;
       }
 
       .sheet-page--question .question-block__number {
-        font-size: 8.8pt;
-        margin-bottom: 1.4mm;
-      }
-
-      .sheet-page--question .question-block__text {
-        font-size: 9.8pt;
-        line-height: 1.28;
+        margin-right: 1mm;
       }
 
       .sheet-page--question .choice-list {
-        gap: 1.2mm;
-        margin-top: 2.2mm;
+        gap: 0.8mm;
+        margin-top: 1.5mm;
       }
 
       .sheet-page--question .choice-list li {
-        gap: 2mm;
-        grid-template-columns: 5.4mm minmax(0, 1fr);
-        padding: 1.5mm 1.8mm;
+        gap: 1.4mm;
+        grid-template-columns: 4.6mm minmax(0, 1fr);
       }
 
       .sheet-page--question .choice-key,
       .sheet-page--question .choice-text {
-        font-size: 9.2pt;
-        line-height: 1.22;
+        font-size: 8.75pt;
+        line-height: 1.14;
       }
 
       .pagination-measure {
@@ -1976,8 +2641,8 @@ def render_student_cover_page(
     )
     student_info = "".join(
         [
-            render_student_line_field("Student Name", wide=True),
-            render_student_line_field("Student ID"),
+            render_student_line_field("Name", wide=True),
+            render_student_line_field("ID"),
             render_student_line_field("Class / Section"),
             render_student_line_field("Signature", wide=True),
         ]
@@ -2038,7 +2703,7 @@ def render_student_question_blocks(variant: dict[str, Any]) -> str:
             f"""
 <li>
   <span class="choice-key">{html.escape(choice['key'])}.</span>
-  <span class="choice-text">{html.escape(choice['text'])}</span>
+  <span class="choice-text" data-rich-text>{html.escape(choice['text'])}</span>
 </li>
 """
             for choice in question["displayChoices"]
@@ -2046,8 +2711,10 @@ def render_student_question_blocks(variant: dict[str, Any]) -> str:
         question_blocks.append(
             f"""
 <article class="question-block" data-question-position="{question['position']}">
-  <p class="question-block__number">Question {question['position']}</p>
-  <p class="question-block__text">{html.escape(question['question'])}</p>
+  <p class="question-block__prompt">
+    <span class="question-block__number">{question['position']}.</span>
+    <span class="question-block__text" data-rich-text>{html.escape(question['question'])}</span>
+  </p>
   <ul class="choice-list">{choices}</ul>
 </article>
 """
@@ -2082,9 +2749,14 @@ def build_omr_sheet_config(
     variant: dict[str, Any],
 ) -> SheetConfig:
     print_settings = get_print_settings(exam_set)
-    option_counts = [len(question.get("displayChoices", [])) for question in variant.get("questions", [])]
+    questions = [question for question in variant.get("questions", []) if isinstance(question, dict)]
+    choice_count = max(
+        (len(question.get("displayChoices", [])) for question in questions),
+        default=0,
+    )
     return SheetConfig(
-        question_option_counts=option_counts,
+        question_count=len(questions),
+        choice_count=choice_count,
         exam_set_id=str(exam_set["examSetId"]),
         variant_id=str(variant["variantId"]),
         title=print_settings["examName"] or "Optical Mark Recognition Sheet",
@@ -2148,9 +2820,18 @@ def render_student_omr_pages(exam_set: dict[str, Any], variant: dict[str, Any]) 
 
 def render_student_pagination_script() -> str:
     return """
-    <script>
+    <script type="module">
+""" + load_web_text_asset("rich-text.js") + """
       (() => {
         window.__quizPoolPrintableReady = false;
+
+        function renderPrintableRichText() {
+          const bank = document.querySelector('#question-bank');
+          if (bank instanceof HTMLTemplateElement) {
+            renderRichTextTargets(bank.content);
+          }
+          renderRichTextTargets(document);
+        }
 
         function createQuestionPage() {
           const template = document.querySelector('#question-page-template');
@@ -2240,14 +2921,22 @@ def render_student_pagination_script() -> str:
           scheduled = true;
           requestAnimationFrame(() => {
             scheduled = false;
+            renderPrintableRichText();
             paginateStudentView();
           });
         }
 
-        window.addEventListener('DOMContentLoaded', schedulePagination, { once: true });
+        if (document.readyState === 'loading') {
+          window.addEventListener('DOMContentLoaded', schedulePagination, { once: true });
+        } else {
+          schedulePagination();
+        }
         window.addEventListener('load', schedulePagination, { once: true });
         window.addEventListener('resize', schedulePagination);
-        window.addEventListener('beforeprint', paginateStudentView);
+        window.addEventListener('beforeprint', () => {
+          renderPrintableRichText();
+          paginateStudentView();
+        });
       })();
     </script>
 """
@@ -2343,7 +3032,10 @@ def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
     question_pool_name = str(exam_set.get("questionPoolFileName") or QUESTION_POOL_PRINTABLE_NAME)
 
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        question_pool_pdf = render_html_to_pdf(render_question_pool_html(exam_set, question_pool))
+        question_pool_pdf = render_latex_to_pdf(
+            build_question_pool_latex_document(exam_set, question_pool),
+            job_name="question-pool",
+        )
         archive.writestr(
             f"{base_folder}/{question_pool_name}",
             question_pool_pdf,
@@ -2353,8 +3045,10 @@ def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
                 variant.get("printableFileName")
                 or build_variant_printable_filename(variant.get("printableOrdinal", 1), len(variants))
             )
-            student_printable_pdf = render_html_to_pdf(
-                render_variant_html(exam_set, variant, include_omr_pages=False)
+            student_printable_pdf = render_latex_to_pdf(
+                build_student_latex_document(exam_set, variant),
+                job_name=f"student-variant-{int(variant.get('printableOrdinal') or 1):02d}",
+                assets=build_student_latex_assets(exam_set, variant),
             )
             omr_pdf = build_omr_sheet_pdf_bytes(exam_set, variant)
             variant_pdf = append_pdf_documents(student_printable_pdf, omr_pdf)
@@ -2670,7 +3364,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             try:
                 payload = build_printable_zip(state, exam_set)
-            except OSError as error:
+            except (OSError, ValueError) as error:
                 self.send_json(
                     {"errors": [{"path": "<export>", "message": str(error)}]},
                     status=HTTPStatus.INTERNAL_SERVER_ERROR,

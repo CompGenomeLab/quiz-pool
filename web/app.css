@@ -355,6 +355,198 @@ textarea {
   white-space: pre-wrap;
 }
 
+.qp-math {
+  align-items: flex-end;
+  display: inline-flex;
+  margin: 0 0.08em;
+  max-width: 100%;
+  vertical-align: -0.08em;
+  white-space: nowrap;
+}
+
+.qp-mrow {
+  align-items: flex-end;
+  display: inline-flex;
+  gap: 0.04em;
+  white-space: nowrap;
+}
+
+.qp-mi,
+.qp-mn,
+.qp-mo,
+.qp-mtext,
+.qp-script__base,
+.qp-script__sup,
+.qp-script__sub,
+.qp-frac__top,
+.qp-frac__bottom,
+.qp-root__index,
+.qp-root__radical,
+.qp-root__body {
+  line-height: 1;
+}
+
+.qp-mi {
+  font-style: italic;
+}
+
+.qp-mi--normal,
+.qp-mtext {
+  font-style: normal;
+}
+
+.qp-mspace {
+  display: inline-block;
+  width: var(--qp-space-width, 0.2em);
+}
+
+.qp-accent {
+  align-items: center;
+  display: inline-flex;
+  flex-direction: column;
+  margin: 0 0.03em;
+  white-space: nowrap;
+}
+
+.qp-accent__glyph,
+.qp-accent__body {
+  line-height: 1;
+}
+
+.qp-accent__glyph {
+  display: block;
+}
+
+.qp-accent--bar .qp-accent__glyph {
+  border-top: 1px solid currentColor;
+  margin-bottom: 0.08em;
+  min-width: 100%;
+  width: 100%;
+}
+
+.qp-accent--glyph .qp-accent__glyph {
+  font-size: 0.68em;
+  margin-bottom: -0.08em;
+  transform: translateY(0.06em) scaleX(1.08);
+}
+
+.qp-script {
+  align-items: baseline;
+  display: inline-flex;
+  white-space: nowrap;
+}
+
+.qp-script--sup,
+.qp-script--sub {
+  gap: 0.05em;
+}
+
+.qp-script__sup,
+.qp-script__sub {
+  display: inline-block;
+  font-size: 0.68em;
+}
+
+.qp-script--sup .qp-script__sup {
+  transform: translateY(-0.45em);
+}
+
+.qp-script--sub .qp-script__sub {
+  transform: translateY(0.4em);
+}
+
+.qp-script__stack {
+  display: inline-flex;
+  flex-direction: column;
+  margin-left: 0.05em;
+}
+
+.qp-script__stack .qp-script__sup {
+  transform: translateY(-0.08em);
+}
+
+.qp-script__stack .qp-script__sub {
+  transform: translateY(0.14em);
+}
+
+.qp-frac {
+  align-items: center;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  margin: 0 0.08em;
+  vertical-align: middle;
+}
+
+.qp-frac__top,
+.qp-frac__bottom {
+  display: block;
+  font-size: 0.82em;
+  padding: 0 0.14em;
+}
+
+.qp-frac__bar {
+  border-top: 1px solid currentColor;
+  display: block;
+  margin: 0.06em 0 0.04em;
+  min-width: 100%;
+  width: 100%;
+}
+
+.qp-root {
+  align-items: flex-end;
+  display: inline-flex;
+  margin: 0 0.04em;
+  white-space: nowrap;
+}
+
+.qp-root__index {
+  font-size: 0.56em;
+  margin-right: 0.02em;
+  transform: translateY(-0.52em);
+}
+
+.qp-root__radical {
+  font-size: 1.15em;
+}
+
+.qp-root__body {
+  border-top: 1px solid currentColor;
+  margin-left: -0.05em;
+  padding: 0.08em 0 0 0.14em;
+}
+
+.qp-math__source {
+  font-family: "Iosevka", "SFMono-Regular", "SF Mono", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.qp-math[data-qp-math-state="pending"] .qp-math__source,
+.qp-math[data-qp-math-state="rendering"] .qp-math__source {
+  opacity: 0.68;
+}
+
+.qp-math mjx-container[jax="SVG"] {
+  display: inline-block !important;
+  margin: 0 !important;
+  max-width: 100%;
+}
+
+.qp-math mjx-container[jax="SVG"] > svg {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.qp-math--error {
+  background: rgba(201, 106, 106, 0.08);
+  border: 1px solid rgba(159, 77, 77, 0.18);
+  border-radius: 10px;
+  font-family: "Courier New", monospace;
+  font-size: 0.92em;
+  padding: 0.16em 0.4em;
+}
+
 @keyframes busy-spin {
   from {
     transform: rotate(0deg);
@@ -532,6 +724,14 @@ textarea {
 .helper-copy {
   color: var(--muted);
   margin: 0;
+}
+
+.rich-preview {
+  background: rgba(247, 244, 235, 0.72);
+  border: 1px solid rgba(23, 59, 99, 0.12);
+  border-radius: 14px;
+  min-height: 3.4rem;
+  padding: 0.9rem 1rem;
 }
 
 .table-wrap {
@@ -898,8 +1098,25 @@ textarea {
   background: rgba(20, 108, 89, 0.08);
   border-radius: 12px;
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px;
+}
+
+.choice-pill__key {
+  font-weight: 700;
+}
+
+.choice-pill__text {
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.choice-pill__meta {
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .teacher-panel {
@@ -1173,6 +1390,12 @@ textarea {
 
 .field textarea {
   resize: vertical;
+}
+
+.field__hint {
+  font-size: 0.83rem;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .field--full {

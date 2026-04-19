@@ -1,3 +1,5 @@
+import { renderRichTextHtml, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
+
 const state = {
   activePoolQuestionId: "",
   dbPath: "",
@@ -19,14 +21,14 @@ const state = {
 };
 
 const DEFAULT_EXAM_RULES = [
-  "Fully fill the bubbles. Do not leave any student ID column blank.",
+  "Fully fill bubbles. Do not leave any Student ID field blank. Include leading zeros.",
   "Read every question carefully and select all correct answers for each question.",
   "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
   "Do not communicate with other students or use unauthorized materials during the exam.",
   "Remain seated until instructed to stop and submit your paper.",
 ];
 const DEFAULT_OMR_INSTRUCTIONS = DEFAULT_EXAM_RULES[0];
-const MAX_QUESTIONS_PER_EXAM = 50;
+const MAX_QUESTIONS_PER_EXAM = 100;
 
 function defaultExamRules(omrInstructions = DEFAULT_OMR_INSTRUCTIONS) {
   return [
@@ -55,7 +57,9 @@ const elements = {
   generatorStatus: document.querySelector("#generator-status"),
   includedCount: document.querySelector("#included-count"),
   institutionName: document.querySelector("#institution-name"),
+  instructor: document.querySelector("#instructor"),
   objectiveFilters: document.querySelector("#objective-filters"),
+  allowedMaterials: document.querySelector("#allowed-materials"),
   poolTableBody: document.querySelector("#pool-table-body"),
   poolQuestionBackdrop: document.querySelector("#pool-question-backdrop"),
   poolQuestionDetail: document.querySelector("#pool-question-detail"),
@@ -93,6 +97,8 @@ function printableMetadata() {
     examDate: elements.examDate.value.trim(),
     startTime: elements.startTime.value.trim(),
     totalTimeMinutes: Number.isFinite(parsedTotalTime) ? parsedTotalTime : null,
+    instructor: elements.instructor.value.trim(),
+    allowedMaterials: elements.allowedMaterials.value.trim(),
     omrInstructions: elements.omrInstructions.value.trim(),
     examRules: parseExamRules(elements.examRules.value),
   };
@@ -111,6 +117,8 @@ function runPrintSettings(run) {
     examDate: normalizeTextValue(settings.examDate, "—"),
     startTime: normalizeTextValue(settings.startTime, "—"),
     totalTimeMinutes: String(settings.totalTimeMinutes ?? "").trim() || "—",
+    instructor: normalizeTextValue(settings.instructor, ""),
+    allowedMaterials: normalizeTextValue(settings.allowedMaterials, ""),
     omrInstructions: normalizeTextValue(settings.omrInstructions, DEFAULT_OMR_INSTRUCTIONS),
     examRules: normalizeExamRules(settings.examRules),
   };
@@ -402,7 +410,7 @@ function renderPoolTable() {
     const prompt = document.createElement("td");
     const promptCopy = document.createElement("p");
     promptCopy.className = "cell-copy";
-    promptCopy.textContent = truncate(question.question);
+    promptCopy.textContent = truncate(stripRichTextMarkup(question.question));
     prompt.append(promptCopy);
 
     const chapters = document.createElement("td");
@@ -502,7 +510,15 @@ function renderPoolQuestionModal() {
     .join(", ") || "—";
   const choicesMarkup = question.choices.map((choice) => {
     const isCorrect = question.correctAnswers.includes(choice.key);
-    return `<li><span class="choice-pill">${escapeHtml(choice.key)}. ${escapeHtml(choice.text)}${isCorrect ? " · Correct" : ""}</span></li>`;
+    return `
+      <li>
+        <span class="choice-pill">
+          <span class="choice-pill__key">${escapeHtml(choice.key)}.</span>
+          <span class="choice-pill__text">${renderRichTextHtml(choice.text)}</span>
+          ${isCorrect ? '<span class="choice-pill__meta">Correct</span>' : ""}
+        </span>
+      </li>
+    `;
   }).join("");
   const referencesMarkup = (question.bookLocations ?? []).map((location) => `
     <tr>
@@ -522,7 +538,7 @@ function renderPoolQuestionModal() {
     </div>
     <section class="question-detail-sheet__block">
       <h3>Prompt</h3>
-      <p class="question-detail-sheet__copy">${escapeHtml(question.question)}</p>
+      <div class="question-detail-sheet__copy">${renderRichTextHtml(question.question)}</div>
     </section>
     <section class="question-detail-sheet__block">
       <h3>Coverage</h3>
@@ -535,7 +551,7 @@ function renderPoolQuestionModal() {
     </section>
     <section class="question-detail-sheet__block">
       <h3>Explanation</h3>
-      <p class="question-detail-sheet__copy">${escapeHtml(question.explanation || "—")}</p>
+      <div class="question-detail-sheet__copy">${renderRichTextHtml(question.explanation || "—")}</div>
     </section>
     <section class="question-detail-sheet__block">
       <h3>Book Locations</h3>
@@ -655,8 +671,8 @@ function renderGeneratedRun() {
     studentInfo.innerHTML = `
       <h4>Student Information</h4>
       <div class="variant-card__line-grid">
-        <div class="variant-card__line-field variant-card__line-field--wide"><span>Student Name</span><i></i></div>
-        <div class="variant-card__line-field"><span>Student ID</span><i></i></div>
+        <div class="variant-card__line-field variant-card__line-field--wide"><span>Name</span><i></i></div>
+        <div class="variant-card__line-field"><span>ID</span><i></i></div>
         <div class="variant-card__line-field"><span>Class / Section</span><i></i></div>
         <div class="variant-card__line-field variant-card__line-field--wide"><span>Signature</span><i></i></div>
       </div>
@@ -664,6 +680,12 @@ function renderGeneratedRun() {
 
     const examInfo = document.createElement("div");
     examInfo.className = "variant-card__block";
+    const instructorFact = printSettings.instructor
+      ? `<div class="variant-card__fact"><span>Instructor</span><strong>${escapeHtml(printSettings.instructor)}</strong></div>`
+      : "";
+    const materialsFact = printSettings.allowedMaterials
+      ? `<div class="variant-card__fact"><span>Materials</span><strong>${escapeHtml(printSettings.allowedMaterials)}</strong></div>`
+      : "";
     examInfo.innerHTML = `
       <h4>Exam Information</h4>
       <div class="variant-card__fact-grid">
@@ -672,6 +694,8 @@ function renderGeneratedRun() {
         <div class="variant-card__fact"><span>Exam Date</span><strong>${escapeHtml(printSettings.examDate)}</strong></div>
         <div class="variant-card__fact"><span>Start Time</span><strong>${escapeHtml(printSettings.startTime)}</strong></div>
         <div class="variant-card__fact"><span>Total Time in Minutes</span><strong>${escapeHtml(printSettings.totalTimeMinutes)}</strong></div>
+        ${instructorFact}
+        ${materialsFact}
         <div class="variant-card__fact"><span>Number of Questions</span><strong>${variant.questions.length}</strong></div>
         <div class="variant-card__fact"><span>Total Points</span><strong>${variant.questions.reduce((total, question) => total + Number(question.points ?? 1), 0)}</strong></div>
         <div class="variant-card__fact"><span>Number of Pages</span><strong>${variantPageCount(variant)}</strong></div>
@@ -704,7 +728,7 @@ function renderGeneratedRun() {
 
       const title = document.createElement("p");
       title.className = "question-preview__title";
-      title.textContent = question.question;
+      renderRichTextIntoElement(title, question.question);
 
       const choices = document.createElement("ul");
       choices.className = "choice-list";
@@ -712,7 +736,13 @@ function renderGeneratedRun() {
         const item = document.createElement("li");
         const pill = document.createElement("span");
         pill.className = "choice-pill";
-        pill.textContent = `${choice.key}. ${choice.text}`;
+        const key = document.createElement("span");
+        key.className = "choice-pill__key";
+        key.textContent = `${choice.key}.`;
+        const text = document.createElement("span");
+        text.className = "choice-pill__text";
+        renderRichTextIntoElement(text, choice.text);
+        pill.append(key, text);
         item.append(pill);
         choices.append(item);
       }

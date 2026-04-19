@@ -34,11 +34,13 @@ Generated sheets are:
 
 - A4 portrait
 - marker-based for registration
-- 5-digit student ID
-- 4 answer columns per page
-- question columns with at most `13` questions per column
-- up to `50` questions per page
-- `2` to `5` answer options per question
+- 8-digit student ID
+- handwritten template fields for `Name`, `ID`, and `Signature`
+- 5 answer columns on a single page
+- question columns with at most `20` questions per column
+- up to `100` questions on a single page
+- `2` to `5` answer options per question, fixed across the whole sheet
+- displayed PDF text uses Latin Modern and falls back to Computer Modern, resolved from the system or cached locally on first use
 - QR-backed with `examSetId` and `variantId`
 
 The QR payload format is:
@@ -56,7 +58,8 @@ The QR payload format is:
 
 ```bash
 uv run omr \
-  --questions 4,4,5,3,2,5 \
+  --questions 100 \
+  --choices 5 \
   --exam-set-id f6adcc63-71dc-412c-9c8d-a4609df454ff \
   --variant-id 37e3d65f-e540-4e34-b438-549e731be3b0 \
   --output omr-sheet.pdf
@@ -66,7 +69,8 @@ With custom title and instructions:
 
 ```bash
 uv run omr \
-  --questions 4,4,4,4,5,5,3,2 \
+  --questions 40 \
+  --choices 5 \
   --exam-set-id exam-set-001 \
   --variant-id variant-a \
   --output exam-a.pdf \
@@ -76,7 +80,8 @@ uv run omr \
 
 Arguments:
 
-- `--questions`: required comma-separated option counts like `4,4,5,3`
+- `--questions`: required total number of questions to print
+- `--choices`: required number of choices for every question
 - `--exam-set-id`: required
 - `--variant-id`: required
 - `--output`: optional, defaults to `omr-sheet.pdf`
@@ -85,12 +90,15 @@ Arguments:
 
 Rules:
 
-- each question count must be between `2` and `5`
+- question count must be at least `1`
+- question count must not exceed `100`
+- choice count must be between `2` and `5`
+- every generated question uses the same printed choices
 - questions are numbered from `1`
-- each question column holds at most `13` rows
-- each page holds at most `50` questions
-- extra questions spill onto new pages
+- the single-page layout uses `5` columns with `20` rows each
+- the sheet holds at most `100` questions on one page
 - the final sheet does not include page numbering
+- `--choices 4` prints `A-D`; `--choices 5` prints `A-E`
 
 ### 2. Grade a Filled Sheet
 
@@ -176,7 +184,8 @@ from omr import (
 from omr import SheetConfig, generate_omr_sheet
 
 config = SheetConfig(
-    question_option_counts=[4, 4, 5, 3, 2, 5],
+    question_count=100,
+    choice_count=4,
     exam_set_id="f6adcc63-71dc-412c-9c8d-a4609df454ff",
     variant_id="37e3d65f-e540-4e34-b438-549e731be3b0",
     title="Optical Mark Recognition Sheet",
@@ -216,7 +225,7 @@ Fields:
 Notes:
 
 - grading raises an OMR error if any student ID column is empty or has multiple marked digits
-- the default A4 layout uses 4 columns and 13 rows per column, capped at 50 questions per page
+- the default A4 layout uses 5 columns and 20 rows, capped at 100 questions on one page
 
 ### Grade a Directory
 
@@ -313,7 +322,7 @@ Fields per item:
     "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
     "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
   },
-  "student_id": "63620",
+  "student_id": "63620147",
   "marked_answers": {
     "1": ["D"],
     "2": ["C"],
@@ -336,7 +345,7 @@ Fields per item:
       "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
       "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
     },
-    "student_id": "63620",
+    "student_id": "63620147",
     "marked_answers": {
       "1": ["D"]
     },
@@ -360,7 +369,7 @@ Fields per item:
     "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
     "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
   },
-  "student_id": "63620",
+  "student_id": "63620147",
   "marked_answers": {
     "1": ["D"]
   },
@@ -422,7 +431,8 @@ Rules:
 
 ```bash
 uv run omr \
-  --questions 4,4,5,3,2,5 \
+  --questions 100 \
+  --choices 5 \
   --exam-set-id exam-set-001 \
   --variant-id variant-a \
   --output sheet.pdf
@@ -450,8 +460,8 @@ uv run omr-annotate scans/ --output reviewed/
 ## Limitations
 
 - grading requires the current marker-based sheet format
-- grading reads only the first page of each PDF
-- student ID is fixed to 5 digits
+- question count is capped at `100`
+- student ID is fixed to 8 digits
 - student ID columns must have exactly one marked digit each
 - option labels are limited to `A-E`
 - geometric registration is marker-first

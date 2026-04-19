@@ -1,0 +1,153 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\IfFileExists{lmodern.sty}{\usepackage{lmodern}}{}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\newif\ifquizpoolenumitem
+\IfFileExists{enumitem.sty}{\usepackage{enumitem}\quizpoolenumitemtrue}{\quizpoolenumitemfalse}
+\usepackage{fancyhdr}
+\newif\ifquizpoollastpage
+\IfFileExists{lastpage.sty}{\usepackage{lastpage}\quizpoollastpagetrue}{\quizpoollastpagefalse}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{multicol}
+\IfFileExists{needspace.sty}{\usepackage{needspace}}{\providecommand{\Needspace}[1]{}}
+
+\definecolor{PrismBlue}{HTML}{173B63}
+\definecolor{PrismGray}{HTML}{F4F6F8}
+
+\newcommand{\institution}{%%QUIZPOOL_INSTITUTION%%}
+\newcommand{\department}{%%QUIZPOOL_DEPARTMENT%%}
+\newcommand{\coursename}{%%QUIZPOOL_COURSE%%}
+\newcommand{\examtitle}{%%QUIZPOOL_EXAM_NAME%%}
+\newcommand{\semester}{%%QUIZPOOL_SEMESTER%%}
+\newcommand{\examdate}{%%QUIZPOOL_EXAM_DATE%%}
+\newcommand{\duration}{%%QUIZPOOL_TOTAL_TIME%%}
+\newcommand{\totalmarks}{%%QUIZPOOL_TOTAL_POINTS%%}
+\newcommand{\questioncount}{%%QUIZPOOL_QUESTION_COUNT%%}
+\newcommand{\instructor}{%%QUIZPOOL_INSTRUCTOR%%}
+\newcommand{\allowedmaterials}{%%QUIZPOOL_ALLOWED_MATERIALS%%}
+\newcommand{\pointsperquestion}{%%QUIZPOOL_POINTS_PER_QUESTION%%}
+\newcommand{\pageqr}{%%QUIZPOOL_PAGE_QR%%}
+
+\newenvironment{qpinstructions}{%
+  \ifquizpoolenumitem
+    \begin{enumerate}[leftmargin=1.5em, itemsep=0.35em, topsep=0.4em]
+  \else
+    \begin{enumerate}
+      \setlength{\itemsep}{0.35em}
+      \setlength{\topsep}{0.4em}
+  \fi
+}{%
+  \end{enumerate}
+}
+
+\newenvironment{qpquestions}{%
+  \ifquizpoolenumitem
+    \begin{enumerate}[leftmargin=*, label=\textbf{Q\arabic*.}, itemsep=1em]
+  \else
+    \renewcommand{\labelenumi}{\textbf{Q\arabic{enumi}.}}
+    \begin{enumerate}
+      \setlength{\itemsep}{1em}
+  \fi
+}{%
+  \end{enumerate}
+}
+
+\newcommand{\mcqitem}[2]{%
+  \Needspace{7\baselineskip}%
+  \item\relax
+  \begin{minipage}[t]{\linewidth}
+    #1\par
+    \vspace{0.3em}
+    {\footnotesize\renewcommand{\arraystretch}{1.1}%
+    \begin{tabularx}{\linewidth}{@{}>{\bfseries}lX@{}}
+      #2
+    \end{tabularx}}
+  \end{minipage}
+}
+
+\setlength{\headheight}{14pt}
+\setlength{\footskip}{36pt}
+\setlength{\parindent}{0pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\institution}
+\chead{\coursename}
+\rhead{\examtitle}
+\ifquizpoollastpage
+  \cfoot{Page \thepage\ of \pageref{LastPage}}
+\else
+  \cfoot{Page \thepage}
+\fi
+\rfoot{\pageqr}
+
+\begin{document}
+
+\begin{center}
+  {\Large\bfseries \institution \par}
+  \vspace{0.3em}
+  {\large \department \par}
+  \vspace{0.8em}
+  {\LARGE\bfseries \examtitle \par}
+  \vspace{0.35em}
+  {\large \coursename \par}
+  \vspace{0.2em}
+  {\normalsize \semester \par}
+\end{center}
+
+\vspace{0.8em}
+
+\begin{tabularx}{\textwidth}{@{}>{\bfseries}lX>{\bfseries}lX@{}}
+Instructor: & \instructor & Date: & \examdate \\
+Duration: & \duration & Total Marks: & \totalmarks \\
+Materials: & \allowedmaterials & & \\
+\end{tabularx}
+
+\vspace{1em}
+
+{\renewcommand{\arraystretch}{1.8}
+\begin{tabularx}{\textwidth}{|>{\bfseries}l|X|}
+\hline
+Name & \\
+\hline
+ID & \\
+\hline
+Signature & \\
+\hline
+\end{tabularx}}
+
+\vspace{1em}
+
+\noindent\fcolorbox{PrismBlue}{white}{%
+\parbox{\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax}{%
+\textbf{Instructions}
+\begin{qpinstructions}
+%%QUIZPOOL_RULES%%
+\end{qpinstructions}}}
+
+\vspace{1.2em}
+
+\newpage
+\section*{Multiple Choice Questions}
+\textit{%%QUIZPOOL_QUESTION_HEADING%%}
+
+\vspace{0.5em}
+
+{\small
+\setlength{\columnsep}{18pt}
+\raggedcolumns
+\begin{multicols}{2}
+\begin{qpquestions}
+%%QUIZPOOL_QUESTION_BLOCKS%%
+\end{qpquestions}
+\end{multicols}}
+
+\vfill
+
+\end{document}

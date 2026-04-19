@@ -1,3 +1,5 @@
+import { renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
+
 const state = {
   examSets: [],
   examStorePath: "",
@@ -130,17 +132,23 @@ function renderQuestionPool(questionPool) {
   const fragment = document.createDocumentFragment();
   for (const question of questionPool) {
     const row = document.createElement("tr");
-    for (const value of [
-      question.sourceQuestionId,
-      truncate(question.question),
-      String(question.points ?? 1),
-      question.choices.map((choice) => `${choice.key}. ${choice.text}`).join(" | "),
-      question.sourceCorrectAnswers.join(", "),
-    ]) {
-      const cell = document.createElement("td");
-      cell.textContent = value || "—";
-      row.append(cell);
-    }
+    const idCell = document.createElement("td");
+    idCell.textContent = question.sourceQuestionId || "—";
+
+    const questionCell = document.createElement("td");
+    questionCell.className = "cell-copy";
+    renderRichTextIntoElement(questionCell, question.question || "—");
+
+    const pointsCell = document.createElement("td");
+    pointsCell.textContent = String(question.points ?? 1);
+
+    const choicesCell = document.createElement("td");
+    choicesCell.textContent = question.choices.map((choice) => `${choice.key}. ${stripRichTextMarkup(choice.text)}`).join(" | ") || "—";
+
+    const correctCell = document.createElement("td");
+    correctCell.textContent = question.sourceCorrectAnswers.join(", ") || "—";
+
+    row.append(idCell, questionCell, pointsCell, choicesCell, correctCell);
     fragment.append(row);
   }
   elements.viewerQuestionPoolBody.replaceChildren(fragment);
@@ -196,7 +204,7 @@ function renderVariants(variants, printSettings) {
 
       const prompt = document.createElement("p");
       prompt.className = "question-preview__title";
-      prompt.textContent = question.question;
+      renderRichTextIntoElement(prompt, question.question);
 
       const choices = document.createElement("ul");
       choices.className = "choice-list";
@@ -204,7 +212,13 @@ function renderVariants(variants, printSettings) {
         const item = document.createElement("li");
         const pill = document.createElement("span");
         pill.className = "choice-pill";
-        pill.textContent = `${choice.key}. ${choice.text}`;
+        const key = document.createElement("span");
+        key.className = "choice-pill__key";
+        key.textContent = `${choice.key}.`;
+        const text = document.createElement("span");
+        text.className = "choice-pill__text";
+        renderRichTextIntoElement(text, choice.text);
+        pill.append(key, text);
         item.append(pill);
         choices.append(item);
       }

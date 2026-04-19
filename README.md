@@ -30,6 +30,7 @@ Each question supports:
 - one or more linked learning objectives
 - one or more book locations
 - optional explanation
+- inline LaTeX snippets inside question and choice text via `[math]...[/math]`, for example `[math]A = \pi r^{2}[/math]`
 
 Learning objectives are not fixed to `6`; they are editable in the Editor and use IDs like `LO1`, `LO2`, `LO3`, ...
 

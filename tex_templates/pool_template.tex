@@ -1,0 +1,90 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\IfFileExists{lmodern.sty}{\usepackage{lmodern}}{}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\newif\ifquizpoolenumitem
+\IfFileExists{enumitem.sty}{\usepackage{enumitem}\quizpoolenumitemtrue}{\quizpoolenumitemfalse}
+\usepackage{fancyhdr}
+\newif\ifquizpoollastpage
+\IfFileExists{lastpage.sty}{\usepackage{lastpage}\quizpoollastpagetrue}{\quizpoollastpagefalse}
+\usepackage[table]{xcolor}
+\usepackage{tabularx}
+\IfFileExists{needspace.sty}{\usepackage{needspace}}{\providecommand{\Needspace}[1]{}}
+
+\definecolor{PrismBlue}{HTML}{173B63}
+\definecolor{PrismGray}{HTML}{F4F6F8}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\newcommand{\institution}{%%QUIZPOOL_INSTITUTION%%}
+\newcommand{\coursename}{%%QUIZPOOL_COURSE%%}
+\newcommand{\examtitle}{%%QUIZPOOL_EXAM_NAME%%}
+\newcommand{\examdate}{%%QUIZPOOL_EXAM_DATE%%}
+\newcommand{\instructor}{%%QUIZPOOL_INSTRUCTOR%%}
+\newcommand{\allowedmaterials}{%%QUIZPOOL_ALLOWED_MATERIALS%%}
+\newcommand{\examsetid}{%%QUIZPOOL_EXAM_SET_ID%%}
+\newcommand{\selectedcount}{%%QUIZPOOL_SELECTED_COUNT%%}
+
+\newenvironment{qppoolquestions}{%
+  \ifquizpoolenumitem
+    \begin{enumerate}[leftmargin=*, label=\textbf{Q\arabic*.}, itemsep=1.05em]
+  \else
+    \renewcommand{\labelenumi}{\textbf{Q\arabic{enumi}.}}
+    \begin{enumerate}
+      \setlength{\itemsep}{1.05em}
+  \fi
+}{%
+  \end{enumerate}
+}
+
+\setlength{\headheight}{14pt}
+\setlength{\parindent}{0pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\institution}
+\chead{\coursename}
+\rhead{Question Pool}
+\ifquizpoollastpage
+  \cfoot{Page \thepage\ of \pageref{LastPage}}
+\else
+  \cfoot{Page \thepage}
+\fi
+
+\begin{document}
+
+\begin{center}
+  {\Large\bfseries \institution \par}
+  \vspace{0.3em}
+  {\LARGE\bfseries \examtitle \par}
+  \vspace{0.35em}
+  {\large \coursename \par}
+\end{center}
+
+\vspace{0.8em}
+
+\begin{tabularx}{\textwidth}{@{}>{\bfseries}lX>{\bfseries}lX@{}}
+Instructor: & \instructor & Exam Date: & \examdate \\
+Materials: & \allowedmaterials & Exam Set: & \examsetid \\
+Selected Questions: & \selectedcount & Document: & Question Pool Review \\
+\end{tabularx}
+
+\vspace{1em}
+
+\noindent\fcolorbox{PrismBlue}{white}{%
+\parbox{\dimexpr\textwidth-2\fboxsep-2\fboxrule\relax}{%
+\textbf{Purpose}\par
+This document shows the shared source question set before variant-specific shuffling.}}
+
+\vspace{1.2em}
+
+\section*{Source Questions}
+\begin{qppoolquestions}
+%%QUIZPOOL_QUESTION_BLOCKS%%
+\end{qppoolquestions}
+
+\end{document}

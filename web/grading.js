@@ -1,3 +1,5 @@
+import { renderRichTextHtml } from "./rich-text.js";
+
 const state = {
   annotationResults: null,
   busyMessage: "",
@@ -314,7 +316,7 @@ function renderSelectedDetail(rows) {
     ? selectedRow.questionDetails.map((question) => `
       <tr>
         <td>${question.position}</td>
-        <td class="cell-copy">${escapeHtml(question.prompt || "—")}</td>
+        <td class="cell-copy">${renderRichTextHtml(question.prompt || "—")}</td>
         <td>${escapeHtml(question.allowedChoices.join(", ") || "—")}</td>
         <td>${escapeHtml(question.markedAnswers.join(", ") || "—")}</td>
         <td>${escapeHtml(question.correctAnswers.join(", ") || "—")}</td>
