@@ -59,7 +59,7 @@ LATEX_VARIANT_QR_DISPLAY_WIDTH = "0.78in"
 QUESTION_PAGE_CAPACITY = 130
 MAX_QUESTIONS_PER_EXAM = 100
 DEFAULT_OMR_INSTRUCTIONS = (
-    "Fully fill bubbles. Do not leave any Student ID field blank. Include leading zeros."
+    "Fully fill bubbles. Do not leave any Student ID column blank. Include leading zeros."
 )
 DEFAULT_EXAM_RULES = [
     DEFAULT_OMR_INSTRUCTIONS,
