@@ -1,4 +1,4 @@
-import { renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
+import { hasRichTextMarkup, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
 
 const state = {
   dbPath: "",
@@ -23,7 +23,7 @@ const elements = {
   addObjective: document.querySelector("#add-objective"),
   addQuestion: document.querySelector("#add-question"),
   addLocation: document.querySelector("#add-location"),
-  bookLocations: document.querySelector("#book-locations"),
+  locations: document.querySelector("#locations"),
   cancelReload: document.querySelector("#cancel-reload"),
   choicesEditor: document.querySelector("#choices-editor"),
   confirmUnsavedNav: document.querySelector("#confirm-unsaved-nav"),
@@ -177,9 +177,11 @@ function normalizeCorrectAnswers(rawAnswers, activeChoices) {
 
 function normalizeQuestionDraft(question = {}) {
   const choices = normalizeChoices(question.choices);
-  const rawLocations = Array.isArray(question.bookLocations) && question.bookLocations.length > 0
-    ? question.bookLocations
-    : [defaultBookLocation()];
+  const rawLocations = Array.isArray(question.locations) && question.locations.length > 0
+    ? question.locations
+    : Array.isArray(question.bookLocations) && question.bookLocations.length > 0
+      ? question.bookLocations
+      : [defaultLocation()];
 
   return {
     id: question.id ?? nextQuestionId(),
@@ -188,10 +190,12 @@ function normalizeQuestionDraft(question = {}) {
     shuffleChoices: Boolean(question.shuffleChoices),
     learningObjectiveIds: Array.isArray(question.learningObjectiveIds) ? [...question.learningObjectiveIds] : [],
     correctAnswers: normalizeCorrectAnswers(question.correctAnswers, choices),
-    bookLocations: rawLocations.map((location) => ({
+    locations: rawLocations.map((location) => ({
+      source: location.source ?? "",
       chapter: location.chapter ?? "",
       section: location.section ?? "",
       page: location.page ?? "",
+      url: location.url ?? "",
       reference: location.reference ?? "",
     })),
     points: clampPoints(question.points),
@@ -200,11 +204,13 @@ function normalizeQuestionDraft(question = {}) {
   };
 }
 
-function defaultBookLocation() {
+function defaultLocation() {
   return {
+    source: "",
     chapter: "",
     section: "",
     page: "",
+    url: "",
     reference: "",
   };
 }
@@ -361,15 +367,30 @@ function renderQuestionObjectiveLinks() {
 
 function renderChoices(question) {
   const fragment = document.createDocumentFragment();
+  const previewSyncers = [];
   for (const choice of question.choices) {
     const node = templates.choice.content.firstElementChild.cloneNode(true);
     const checkbox = node.querySelector('input[type="checkbox"]');
     const badge = node.querySelector(".choice-row__correct span");
     const textInput = node.querySelector('.field input');
+    const previewField = node.querySelector(".choice-row__preview-field");
+    const preview = node.querySelector(".choice-row__preview");
 
     badge.textContent = `${choice.key} Correct`;
     checkbox.checked = question.correctAnswers.includes(choice.key);
     textInput.value = choice.text;
+
+    const syncPreview = (value) => {
+      const isRichText = hasRichTextMarkup(value);
+      previewField.classList.toggle("hidden", !isRichText);
+      if (isRichText) {
+        renderRichTextIntoElement(preview, value || "—");
+      } else {
+        preview.replaceChildren();
+      }
+    };
+
+    previewSyncers.push(() => syncPreview(textInput.value));
 
     checkbox.addEventListener("change", (event) => {
       updateSelectedQuestion((draft) => {
@@ -390,12 +411,16 @@ function renderChoices(question) {
         item.text = event.target.value;
         return draft;
       });
+      syncPreview(event.target.value);
     });
 
     fragment.append(node);
   }
 
   elements.choicesEditor.replaceChildren(fragment);
+  for (const syncPreview of previewSyncers) {
+    syncPreview();
+  }
 }
 
 function renderChoiceActions(question) {
@@ -405,21 +430,21 @@ function renderChoiceActions(question) {
   elements.removeChoice.disabled = !hasQuestion || choiceCount <= MIN_CHOICE_COUNT;
 }
 
-function renderBookLocations(question) {
+function renderLocations(question) {
   const fragment = document.createDocumentFragment();
-  question.bookLocations.forEach((location, index) => {
+  question.locations.forEach((location, index) => {
     const node = templates.location.content.firstElementChild.cloneNode(true);
     const removeButton = node.querySelector("button");
     const inputs = node.querySelectorAll("[data-key]");
 
-    removeButton.disabled = question.bookLocations.length === 1;
+    removeButton.disabled = question.locations.length === 1;
     removeButton.addEventListener("click", () => {
       updateSelectedQuestion((draft) => {
-        if (draft.bookLocations.length === 1) {
-          draft.bookLocations[0] = defaultBookLocation();
+        if (draft.locations.length === 1) {
+          draft.locations[0] = defaultLocation();
           return draft;
         }
-        draft.bookLocations.splice(index, 1);
+        draft.locations.splice(index, 1);
         return draft;
       });
       render();
@@ -430,7 +455,7 @@ function renderBookLocations(question) {
       input.value = location[key] ?? "";
       input.addEventListener("input", (event) => {
         updateSelectedQuestion((draft) => {
-          draft.bookLocations[index][key] = event.target.value;
+          draft.locations[index][key] = event.target.value;
           return draft;
         });
       });
@@ -439,7 +464,7 @@ function renderBookLocations(question) {
     fragment.append(node);
   });
 
-  elements.bookLocations.replaceChildren(fragment);
+  elements.locations.replaceChildren(fragment);
 }
 
 function renderQuestionPreviews(question) {
@@ -460,7 +485,7 @@ function renderQuestionEditor() {
     renderChoiceActions(null);
     renderQuestionObjectiveLinks();
     elements.choicesEditor.replaceChildren();
-    elements.bookLocations.replaceChildren();
+    elements.locations.replaceChildren();
     renderQuestionPreviews(null);
     return;
   }
@@ -477,7 +502,7 @@ function renderQuestionEditor() {
   renderChoiceActions(draft);
   renderChoices(draft);
   renderQuestionObjectiveLinks();
-  renderBookLocations(draft);
+  renderLocations(draft);
   renderQuestionPreviews(draft);
 }
 
@@ -719,7 +744,7 @@ function wireGlobalFields() {
       learningObjectiveIds: state.quiz.learningObjectives.slice(0, 1).map((objective) => objective.id),
       choices: CHOICE_KEYS.slice(0, MIN_CHOICE_COUNT).map((key) => ({ key, text: "" })),
       correctAnswers: ["A"],
-      bookLocations: [defaultBookLocation()],
+      locations: [defaultLocation()],
       points: 1,
     });
     state.quiz.questions.push(newQuestion);
@@ -782,7 +807,7 @@ function wireGlobalFields() {
       return;
     }
     updateSelectedQuestion((draft) => {
-      draft.bookLocations.push(defaultBookLocation());
+      draft.locations.push(defaultLocation());
       return draft;
     });
     render();

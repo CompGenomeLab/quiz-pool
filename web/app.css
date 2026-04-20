@@ -538,6 +538,24 @@ textarea {
   overflow: visible;
 }
 
+.qp-math mjx-assistive-mml {
+  border: 0 !important;
+  clip: rect(1px, 1px, 1px, 1px);
+  display: block !important;
+  height: 1px;
+  left: 0;
+  overflow: hidden !important;
+  padding: 0 !important;
+  position: absolute !important;
+  top: 0;
+  user-select: none;
+  width: 1px !important;
+}
+
+.qp-math mjx-assistive-mml[display="block"] {
+  width: 100% !important;
+}
+
 .qp-math--error {
   background: rgba(201, 106, 106, 0.08);
   border: 1px solid rgba(159, 77, 77, 0.18);
@@ -1475,7 +1493,7 @@ textarea {
 
 .choices-editor,
 .checkbox-stack,
-.book-locations {
+.locations {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1489,10 +1507,17 @@ textarea {
 }
 
 .choice-row {
-  align-items: center;
+  align-items: start;
   display: grid;
   gap: 14px;
   grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.choice-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
 }
 
 .choice-row__correct {
@@ -1502,6 +1527,10 @@ textarea {
   flex-direction: row;
   justify-content: center;
   min-height: 52px;
+}
+
+.choice-row__preview {
+  min-height: 2.75rem;
 }
 
 .choice-row__correct input,

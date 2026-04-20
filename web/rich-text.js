@@ -34,6 +34,7 @@ function renderMathExpression(value) {
 
 function renderRichTextHtml(value) {
   const source = String(value ?? "");
+  MATH_TAG_PATTERN.lastIndex = 0;
   let cursor = 0;
   let output = "";
 
@@ -46,6 +47,12 @@ function renderRichTextHtml(value) {
 
   output += renderPlainTextSegment(source.slice(cursor));
   return output;
+}
+
+function hasRichTextMarkup(value) {
+  const source = String(value ?? "");
+  MATH_TAG_PATTERN.lastIndex = 0;
+  return MATH_TAG_PATTERN.test(source);
 }
 
 function stripRichTextMarkup(value) {
@@ -89,6 +96,9 @@ function ensureMathJaxConfig() {
       startup: {
         typeset: false,
       },
+      options: {
+        enableAssistiveMml: false,
+      },
       tex: {
         packages: {
           "[-]": ["noerrors", "noundefined"],
@@ -102,6 +112,10 @@ function ensureMathJaxConfig() {
   }
 
   window.MathJax.startup.typeset = false;
+  window.MathJax.options = {
+    ...(window.MathJax.options ?? {}),
+    enableAssistiveMml: false,
+  };
   const packages = window.MathJax.tex?.packages;
   if (!packages) {
     window.MathJax.tex = { ...(window.MathJax.tex ?? {}), packages: { "[-]": ["noerrors", "noundefined"] } };
@@ -287,6 +301,7 @@ ensureMathObserver();
 
 export {
   escapeHtml,
+  hasRichTextMarkup,
   renderRichTextHtml,
   renderRichTextIntoElement,
   renderRichTextTargets,

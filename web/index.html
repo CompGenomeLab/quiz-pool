@@ -222,11 +222,11 @@
 
               <section class="card">
                 <div class="panel__subhead">
-                  <h3>Book Locations</h3>
+                  <h3>References</h3>
                   <p>Provide one or more references for the question.</p>
                 </div>
-                <div id="book-locations" class="book-locations"></div>
-                <button id="add-location" class="button button--ghost" type="button">Add Location</button>
+                <div id="locations" class="locations"></div>
+                <button id="add-location" class="button button--ghost" type="button">Add Reference</button>
               </section>
             </div>
           </section>
@@ -247,10 +247,16 @@
           <input type="checkbox" />
           <span></span>
         </label>
-        <label class="field">
-          <span>Choice Text</span>
-          <input type="text" />
-        </label>
+        <div class="choice-row__body">
+          <label class="field">
+            <span>Choice Text</span>
+            <input type="text" />
+          </label>
+          <div class="field choice-row__preview-field hidden">
+            <span>Choice Preview</span>
+            <div class="rich-preview choice-row__preview"></div>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -268,6 +274,10 @@
           <button class="button button--tiny button--danger" type="button">Remove</button>
         </div>
         <div class="field-grid">
+          <label class="field field--full">
+            <span>Source / Citation</span>
+            <input data-key="source" type="text" />
+          </label>
           <label class="field">
             <span>Chapter</span>
             <input data-key="chapter" type="text" />
@@ -279,6 +289,10 @@
           <label class="field">
             <span>Page</span>
             <input data-key="page" type="text" />
+          </label>
+          <label class="field field--full">
+            <span>URL</span>
+            <input data-key="url" type="url" />
           </label>
           <label class="field field--full">
             <span>Reference Note</span>

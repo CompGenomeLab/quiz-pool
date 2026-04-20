@@ -13,7 +13,7 @@ const state = {
   selection: {
     questionCount: 1,
     variantCount: 1,
-    chapters: [],
+    sources: [],
     difficulties: [],
     learningObjectiveIds: [],
     overrides: {},
@@ -39,7 +39,7 @@ function defaultExamRules(omrInstructions = DEFAULT_OMR_INSTRUCTIONS) {
 
 const elements = {
   availableCount: document.querySelector("#available-count"),
-  chapterFilters: document.querySelector("#chapter-filters"),
+  sourceFilters: document.querySelector("#source-filters"),
   courseName: document.querySelector("#course-name"),
   dbPath: document.querySelector("#db-path"),
   difficultyFilters: document.querySelector("#difficulty-filters"),
@@ -179,12 +179,45 @@ function normalizeExamRules(value) {
   return defaultExamRules();
 }
 
-function questionChapters(question) {
+function locationText(value) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return "";
+}
+
+function locationSourceLabel(location = {}) {
+  return (
+    locationText(location.chapter)
+    || locationText(location.source)
+    || locationText(location.url)
+    || locationText(location.reference)
+  );
+}
+
+function locationSourceDisplay(location = {}) {
+  return locationText(location.source) || locationText(location.url) || "—";
+}
+
+function locationLocator(location = {}) {
+  const chapter = locationText(location.chapter);
+  const section = locationText(location.section);
+  const page = locationText(location.page);
+  return [
+    chapter,
+    section,
+    page ? `Page ${page}` : "",
+  ].filter(Boolean).join(" · ") || "—";
+}
+
+function questionSources(question) {
   return dedupe(
-    (question.bookLocations ?? [])
-      .map((location) => location.chapter)
-      .filter((chapter) => typeof chapter === "string" && chapter.trim() !== "")
-      .map((chapter) => chapter.trim()),
+    ((question.locations ?? question.bookLocations) ?? [])
+      .map((location) => locationSourceLabel(location))
+      .filter(Boolean),
   );
 }
 
@@ -193,7 +226,7 @@ function objectiveLabel(objectiveId) {
 }
 
 function filterOptions() {
-  const chapters = dedupe(state.quiz.questions.flatMap(questionChapters)).sort((left, right) =>
+  const sources = dedupe(state.quiz.questions.flatMap(questionSources)).sort((left, right) =>
     left.localeCompare(right),
   );
   const difficulties = dedupe(state.quiz.questions.map((question) => question.difficulty)).sort((left, right) => left - right);
@@ -202,7 +235,7 @@ function filterOptions() {
     label: objective.label,
   }));
 
-  return { chapters, difficulties, learningObjectives };
+  return { sources, difficulties, learningObjectives };
 }
 
 function overrideMode(questionId) {
@@ -216,9 +249,9 @@ function selectedOverrideIds(mode) {
 }
 
 function matchesFilters(question) {
-  if (state.selection.chapters.length > 0) {
-    const chapters = questionChapters(question);
-    if (!chapters.some((chapter) => state.selection.chapters.includes(chapter))) {
+  if (state.selection.sources.length > 0) {
+    const sources = questionSources(question);
+    if (!sources.some((source) => state.selection.sources.includes(source))) {
       return false;
     }
   }
@@ -338,19 +371,19 @@ function createFilterChip(labelText, checked, onChange) {
 function renderFilterGroups() {
   const options = filterOptions();
 
-  const chapterFragment = document.createDocumentFragment();
-  for (const chapter of options.chapters) {
-    chapterFragment.append(
-      createFilterChip(chapter, state.selection.chapters.includes(chapter), (event) => {
-        state.selection.chapters = event.target.checked
-          ? [...state.selection.chapters, chapter]
-          : state.selection.chapters.filter((item) => item !== chapter);
-        state.selection.chapters = dedupe(state.selection.chapters);
+  const sourceFragment = document.createDocumentFragment();
+  for (const source of options.sources) {
+    sourceFragment.append(
+      createFilterChip(source, state.selection.sources.includes(source), (event) => {
+        state.selection.sources = event.target.checked
+          ? [...state.selection.sources, source]
+          : state.selection.sources.filter((item) => item !== source);
+        state.selection.sources = dedupe(state.selection.sources);
         renderPoolState();
       }),
     );
   }
-  elements.chapterFilters.replaceChildren(chapterFragment);
+  elements.sourceFilters.replaceChildren(sourceFragment);
 
   const difficultyFragment = document.createDocumentFragment();
   for (const difficulty of options.difficulties) {
@@ -413,9 +446,9 @@ function renderPoolTable() {
     promptCopy.textContent = truncate(stripRichTextMarkup(question.question));
     prompt.append(promptCopy);
 
-    const chapters = document.createElement("td");
-    chapters.className = "cell-copy";
-    chapters.textContent = questionChapters(question).join(", ") || "—";
+    const sources = document.createElement("td");
+    sources.className = "cell-copy";
+    sources.textContent = questionSources(question).join(", ") || "—";
 
     const difficulty = document.createElement("td");
     difficulty.textContent = String(question.difficulty);
@@ -471,7 +504,7 @@ function renderPoolTable() {
       renderPoolQuestionModal();
     });
 
-    row.append(questionId, prompt, chapters, difficulty, points, objectives, shuffleChoices, statusCell, overrideCell);
+    row.append(questionId, prompt, sources, difficulty, points, objectives, shuffleChoices, statusCell, overrideCell);
     fragment.append(row);
   }
 
@@ -504,7 +537,7 @@ function renderPoolQuestionModal() {
   elements.poolQuestionTitle.textContent = `${question.id} · ${question.points ?? 1} pt`;
   elements.poolQuestionEditLink.href = `/index.html?questionId=${encodeURIComponent(question.id)}`;
 
-  const chapters = questionChapters(question).join(", ") || "—";
+  const sources = questionSources(question).join(", ") || "—";
   const objectives = question.learningObjectiveIds
     .map((objectiveId) => `${objectiveId} · ${objectiveLabel(objectiveId)}`)
     .join(", ") || "—";
@@ -520,12 +553,12 @@ function renderPoolQuestionModal() {
       </li>
     `;
   }).join("");
-  const referencesMarkup = (question.bookLocations ?? []).map((location) => `
+  const referencesMarkup = ((question.locations ?? question.bookLocations) ?? []).map((location) => `
     <tr>
-      <td>${escapeHtml(location.chapter ?? "—")}</td>
-      <td>${escapeHtml(location.section ?? "—")}</td>
-      <td>${escapeHtml(String(location.page ?? "—"))}</td>
-      <td class="cell-copy">${escapeHtml(location.reference ?? "—")}</td>
+      <td>${escapeHtml(locationSourceDisplay(location))}</td>
+      <td>${escapeHtml(locationLocator(location))}</td>
+      <td class="cell-copy">${escapeHtml(locationText(location.url) || "—")}</td>
+      <td class="cell-copy">${escapeHtml(locationText(location.reference) || "—")}</td>
     </tr>
   `).join("");
 
@@ -542,7 +575,7 @@ function renderPoolQuestionModal() {
     </section>
     <section class="question-detail-sheet__block">
       <h3>Coverage</h3>
-      <p class="question-detail-sheet__copy"><strong>Chapters:</strong> ${escapeHtml(chapters)}</p>
+      <p class="question-detail-sheet__copy"><strong>Sources:</strong> ${escapeHtml(sources)}</p>
       <p class="question-detail-sheet__copy"><strong>Learning Objectives:</strong> ${escapeHtml(objectives)}</p>
     </section>
     <section class="question-detail-sheet__block">
@@ -554,15 +587,15 @@ function renderPoolQuestionModal() {
       <div class="question-detail-sheet__copy">${renderRichTextHtml(question.explanation || "—")}</div>
     </section>
     <section class="question-detail-sheet__block">
-      <h3>Book Locations</h3>
+      <h3>References</h3>
       <div class="table-wrap">
         <table class="pool-table">
           <thead>
             <tr>
-              <th>Chapter</th>
-              <th>Section</th>
-              <th>Page</th>
-              <th>Reference</th>
+              <th>Source</th>
+              <th>Locator</th>
+              <th>URL</th>
+              <th>Note</th>
             </tr>
           </thead>
           <tbody>${referencesMarkup || '<tr><td colspan="4">No references listed.</td></tr>'}</tbody>
@@ -810,7 +843,7 @@ async function generateExams() {
   const payload = {
     questionCount: Number.parseInt(elements.questionCount.value, 10),
     variantCount: Number.parseInt(elements.variantCount.value, 10),
-    chapters: [...state.selection.chapters],
+    sources: [...state.selection.sources],
     difficulties: [...state.selection.difficulties],
     learningObjectiveIds: [...state.selection.learningObjectiveIds],
     includeQuestionIds: selectedOverrideIds("include"),

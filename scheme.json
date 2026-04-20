@@ -55,7 +55,7 @@
         "shuffleChoices",
         "learningObjectiveIds",
         "correctAnswers",
-        "bookLocations",
+        "locations",
         "points",
         "difficulty"
       ],
@@ -115,12 +115,12 @@
             "enum": ["A", "B", "C", "D", "E"]
           }
         },
-        "bookLocations": {
+        "locations": {
           "type": "array",
-          "description": "One or more relevant places in the book for this question",
+          "description": "One or more supporting references for this question, such as books, articles, or webpages",
           "minItems": 1,
           "items": {
-            "$ref": "#/$defs/bookLocation"
+            "$ref": "#/$defs/location"
           }
         },
         "difficulty": {
@@ -307,26 +307,33 @@
         }
       ]
     },
-    "bookLocation": {
+    "location": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["chapter"],
       "properties": {
+        "source": {
+          "type": "string",
+          "description": "Optional source citation or title, such as a book, article, site, or webpage title"
+        },
         "chapter": {
           "type": "string",
-          "description": "Chapter reference, e.g. Chapter 3"
+          "description": "Optional chapter or higher-level locator, e.g. Chapter 3"
         },
         "section": {
           "type": "string",
-          "description": "Optional section reference"
+          "description": "Optional section or subsection locator"
         },
         "page": {
           "type": ["integer", "string"],
-          "description": "Optional page number or page range"
+          "description": "Optional page number, page range, or similar locator"
+        },
+        "url": {
+          "type": "string",
+          "description": "Optional URL for a webpage or online source"
         },
         "reference": {
           "type": "string",
-          "description": "Optional free-text note about the book location"
+          "description": "Optional free-text note such as paragraph, figure, table, or other details"
         }
       }
     }

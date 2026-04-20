@@ -25,8 +25,11 @@ import zipfile
 
 from jsonschema import Draft202012Validator
 from omr import SheetConfig, annotate_pdf, generate_omr_sheet, grade_path
+from omr.layout import PageLayout
 from pypdf import PdfReader, PdfWriter
 from pyppeteer import launch
+from reportlab.lib.colors import black
+from reportlab.pdfgen import canvas
 import segno
 
 
@@ -42,8 +45,17 @@ DEFAULT_PRINTABLE_FOLDER = "exam-printables"
 QUESTION_POOL_PRINTABLE_NAME = "question-pool.pdf"
 LATEX_STUDENT_TEMPLATE = ROOT / "tex_templates" / "exam_template.tex"
 LATEX_QUESTION_POOL_TEMPLATE = ROOT / "tex_templates" / "pool_template.tex"
-LATEX_ENGINES = ("xelatex", "lualatex", "pdflatex")
+LATEX_ENGINE = "lualatex"
 LATEX_VARIANT_QR_ASSET_NAME = "variant-qr.pdf"
+LATEX_FONT_ROOT = ROOT / "tex_templates" / "fonts"
+LATEX_FONT_ASSET_PATHS = {
+    "lmroman10-regular.otf": LATEX_FONT_ROOT / "lm" / "lmroman10-regular.otf",
+    "lmroman10-bold.otf": LATEX_FONT_ROOT / "lm" / "lmroman10-bold.otf",
+    "lmroman10-italic.otf": LATEX_FONT_ROOT / "lm" / "lmroman10-italic.otf",
+    "lmroman10-bolditalic.otf": LATEX_FONT_ROOT / "lm" / "lmroman10-bolditalic.otf",
+    "latinmodern-math.otf": LATEX_FONT_ROOT / "lm-math" / "latinmodern-math.otf",
+}
+LATEX_VARIANT_QR_DISPLAY_WIDTH = "0.78in"
 QUESTION_PAGE_CAPACITY = 130
 MAX_QUESTIONS_PER_EXAM = 100
 DEFAULT_OMR_INSTRUCTIONS = (
@@ -613,7 +625,11 @@ def render_question_pool_blocks_latex(question_pool: list[dict[str, Any]]) -> st
     for question in question_pool:
         if not isinstance(question, dict):
             continue
-        chapters = ", ".join(str(chapter).strip() for chapter in question.get("chapters", []) if str(chapter).strip()) or "—"
+        sources = ", ".join(
+            str(source).strip()
+            for source in (question.get("sources") or question.get("chapters") or [])
+            if str(source).strip()
+        ) or "—"
         correct_answers = ", ".join(
             str(answer).strip() for answer in question.get("sourceCorrectAnswers", []) if str(answer).strip()
         ) or "—"
@@ -632,26 +648,31 @@ def render_question_pool_blocks_latex(question_pool: list[dict[str, Any]]) -> st
             latex_escape_text_segment(str(question.get("sourceQuestionId") or "—"), preserve_linebreaks=False),
             f"Difficulty {int(question.get('difficulty') or 0)}",
             f"{int(question.get('points') or 1)} pt",
-            f"Chapters: {latex_escape_text_segment(chapters, preserve_linebreaks=False)}",
+            f"Sources: {latex_escape_text_segment(sources, preserve_linebreaks=False)}",
         ]
         blocks.append(
             "\n".join(
                 [
-                    r"\item",
-                    rf"  {{\small\textbf{{{' \\textbullet{} '.join(meta_bits)}}}}}\par",
-                    f"  {prompt}",
-                    r"  \vspace{0.2em}",
-                    r"  {\renewcommand{\arraystretch}{1.12}%",
-                    r"  \begin{tabularx}{\linewidth}{@{}YY@{}}",
-                    "  " + (render_latex_choice_rows(choices) or "~ & ~"),
-                    r"  \end{tabularx}}",
+                    r"\Needspace{9\baselineskip}",
+                    r"\item\relax",
+                    r"  \begin{minipage}[t]{\linewidth}",
+                    rf"    {{\small\textbf{{{' \\textbullet{} '.join(meta_bits)}}}}}\par",
+                    r"    \vspace{0.18em}",
+                    f"    {prompt}\\par",
+                    r"    \vspace{0.28em}",
+                    r"    {\renewcommand{\arraystretch}{1.12}%",
+                    r"    \begin{tabularx}{\linewidth}{@{}YY@{}}",
+                    "    " + (render_latex_choice_rows(choices) or "~ & ~"),
+                    r"    \end{tabularx}}\par",
+                    r"    \vspace{0.2em}",
                     (
-                        r"  {\small\textbf{Correct:} "
+                        r"    {\small\textbf{Correct:} "
                         + latex_escape_text_segment(correct_answers, preserve_linebreaks=False)
                         + r"\quad\textbf{Objectives:} "
                         + latex_escape_text_segment(objectives, preserve_linebreaks=False)
-                        + "}"
+                        + "}\\par"
                     ),
+                    r"  \end{minipage}",
                 ]
             )
         )
@@ -663,6 +684,18 @@ def apply_latex_template(template_path: Path, replacements: dict[str, str]) -> s
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
     return content
+
+
+def build_latex_font_assets() -> dict[str, bytes]:
+    assets: dict[str, bytes] = {}
+    for asset_name, font_path in LATEX_FONT_ASSET_PATHS.items():
+        if not font_path.is_file():
+            raise OSError(
+                "Vendored LaTeX font asset is missing: "
+                f"{font_path}. Restore the file from tex_templates/fonts."
+            )
+        assets[asset_name] = font_path.read_bytes()
+    return assets
 
 
 def build_question_index(
@@ -799,21 +832,52 @@ def normalize_rule_list(
     return dedupe_preserve_order(items)
 
 
+def _reference_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bool):
+        return ""
+    return str(value).strip()
+
+
+def question_locations(question: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_locations = question.get("locations")
+    if isinstance(raw_locations, list):
+        return [location for location in raw_locations if isinstance(location, dict)]
+    raw_legacy_locations = question.get("bookLocations")
+    if isinstance(raw_legacy_locations, list):
+        return [location for location in raw_legacy_locations if isinstance(location, dict)]
+    return []
+
+
+def extract_question_source_labels(question: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+    for location in question_locations(question):
+        chapter = _reference_text(location.get("chapter"))
+        source = _reference_text(location.get("source"))
+        url = _reference_text(location.get("url"))
+        reference = _reference_text(location.get("reference"))
+        if chapter:
+            labels.append(chapter)
+        elif source:
+            labels.append(source)
+        elif url:
+            labels.append(url)
+        elif reference:
+            labels.append(reference)
+    return dedupe_preserve_order(labels)
+
+
 def extract_question_chapters(question: dict[str, Any]) -> list[str]:
-    chapters: list[str] = []
-    for location in question.get("bookLocations", []):
-        if not isinstance(location, dict):
-            continue
-        chapter = location.get("chapter")
-        if isinstance(chapter, str) and chapter.strip():
-            chapters.append(chapter.strip())
-    return dedupe_preserve_order(chapters)
+    return extract_question_source_labels(question)
 
 
 def question_matches_filters(question: dict[str, Any], request: dict[str, Any]) -> bool:
-    selected_chapters = set(request["chapters"])
-    if selected_chapters:
-        if not selected_chapters.intersection(extract_question_chapters(question)):
+    selected_sources = set(request.get("sources") or request.get("chapters") or [])
+    if selected_sources:
+        if not selected_sources.intersection(extract_question_source_labels(question)):
             return False
 
     selected_difficulties = set(request["difficulties"])
@@ -838,7 +902,11 @@ def normalize_generation_request(
 
     question_count = normalize_positive_int(payload, "questionCount", errors)
     variant_count = normalize_positive_int(payload, "variantCount", errors)
-    chapters = normalize_string_list(payload, "chapters", errors)
+    sources = normalize_string_list(
+        payload,
+        "sources",
+        errors,
+    ) if "sources" in payload else normalize_string_list(payload, "chapters", errors)
     difficulties = normalize_difficulty_list(payload, "difficulties", errors)
     learning_objective_ids = normalize_string_list(payload, "learningObjectiveIds", errors)
     include_question_ids = normalize_string_list(payload, "includeQuestionIds", errors)
@@ -900,7 +968,8 @@ def normalize_generation_request(
         {
             "questionCount": question_count,
             "variantCount": variant_count,
-            "chapters": chapters,
+            "sources": sources,
+            "chapters": sources,
             "difficulties": difficulties,
             "learningObjectiveIds": learning_objective_ids,
             "includeQuestionIds": include_question_ids,
@@ -1374,19 +1443,22 @@ def build_variant_signature(questions: list[dict[str, Any]]) -> str:
 def build_question_pool_entry(
     question: dict[str, Any], objective_labels: dict[str, str]
 ) -> dict[str, Any]:
+    sources = extract_question_source_labels(question)
+    locations = question_locations(question)
     return {
         "sourceQuestionId": question["id"],
         "question": question["question"],
         "difficulty": question["difficulty"],
         "points": question["points"],
-        "chapters": extract_question_chapters(question),
+        "sources": sources,
+        "chapters": sources,
         "learningObjectiveIds": list(question["learningObjectiveIds"]),
         "learningObjectives": [
             {"id": objective_id, "label": objective_labels.get(objective_id, objective_id)}
             for objective_id in question["learningObjectiveIds"]
         ],
         "shuffleChoices": bool(question["shuffleChoices"]),
-        "bookLocations": question["bookLocations"],
+        "locations": locations,
         "choices": [
             {"key": choice["key"], "text": choice["text"]}
             for choice in question["choices"]
@@ -1510,6 +1582,8 @@ def build_variant(
     rendered_questions: list[dict[str, Any]] = []
     for position, question in enumerate(ordered_questions, start=1):
         display_choices, display_correct_answers = rendered_choices_by_question[question["id"]]
+        sources = extract_question_source_labels(question)
+        locations = question_locations(question)
         rendered_questions.append(
             {
                 "position": position,
@@ -1517,14 +1591,15 @@ def build_variant(
                 "question": question["question"],
                 "difficulty": question["difficulty"],
                 "points": question["points"],
-                "chapters": extract_question_chapters(question),
+                "sources": sources,
+                "chapters": sources,
                 "learningObjectiveIds": list(question["learningObjectiveIds"]),
                 "learningObjectives": [
                     {"id": objective_id, "label": objective_labels.get(objective_id, objective_id)}
                     for objective_id in question["learningObjectiveIds"]
                 ],
                 "shuffleChoices": bool(question["shuffleChoices"]),
-                "bookLocations": question["bookLocations"],
+                "locations": locations,
                 "displayChoices": display_choices,
                 "displayCorrectAnswers": display_correct_answers,
                 "sourceCorrectAnswers": list(question["correctAnswers"]),
@@ -1567,9 +1642,39 @@ def render_variant_qr_svg(exam_set_id: str, variant_id: str) -> str:
 
 
 def build_variant_qr_pdf_bytes(exam_set_id: str, variant_id: str) -> bytes:
-    qr_code = segno.make(build_variant_qr_payload(exam_set_id, variant_id))
+    layout = PageLayout()
+    qr_size = float(layout.qr_size)
+    qr_padding = float(layout.qr_padding)
+    qr_code = segno.make(build_variant_qr_payload(exam_set_id, variant_id), error="m")
+    matrix = tuple(tuple(int(cell) for cell in row) for row in qr_code.matrix)
+    module_rows = len(matrix)
+    module_cols = len(matrix[0]) if matrix else 0
+    module_size = min(
+        (qr_size - (2 * qr_padding)) / module_cols,
+        (qr_size - (2 * qr_padding)) / module_rows,
+    )
+    qr_width = module_cols * module_size
+    qr_height = module_rows * module_size
+    qr_x = (qr_size - qr_width) / 2
+    qr_y = (qr_size - qr_height) / 2
+
     buffer = io.BytesIO()
-    qr_code.save(buffer, kind="pdf", scale=3, border=2)
+    pdf = canvas.Canvas(buffer, pagesize=(qr_size, qr_size))
+    pdf.setPageCompression(0)
+    pdf.setStrokeColor(black)
+    pdf.setFillColor(black)
+    pdf.rect(0, 0, qr_size, qr_size, stroke=1, fill=0)
+
+    for row_index, row in enumerate(matrix):
+        for column_index, cell in enumerate(row):
+            if not cell:
+                continue
+            module_x = qr_x + column_index * module_size
+            module_y = qr_y + (module_rows - row_index - 1) * module_size
+            pdf.rect(module_x, module_y, module_size, module_size, stroke=0, fill=1)
+
+    pdf.showPage()
+    pdf.save()
     return buffer.getvalue()
 
 
@@ -1728,7 +1833,8 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
         "selection": {
             "questionCount": request["questionCount"],
             "variantCount": request["variantCount"],
-            "chapters": request["chapters"],
+            "sources": request["sources"],
+            "chapters": request["sources"],
             "difficulties": request["difficulties"],
             "learningObjectiveIds": request["learningObjectiveIds"],
             "includeQuestionIds": request["includeQuestionIds"],
@@ -1825,20 +1931,20 @@ def build_student_latex_document(exam_set: dict[str, Any], variant: dict[str, An
             variant_question_heading(variant),
             preserve_linebreaks=False,
         ),
-        "%%QUIZPOOL_PAGE_QR%%": rf"\includegraphics[width=0.42in]{{{LATEX_VARIANT_QR_ASSET_NAME}}}",
+        "%%QUIZPOOL_PAGE_QR%%": rf"\includegraphics[width={LATEX_VARIANT_QR_DISPLAY_WIDTH}]{{{LATEX_VARIANT_QR_ASSET_NAME}}}",
         "%%QUIZPOOL_QUESTION_BLOCKS%%": render_student_question_blocks_latex(variant),
     }
     return apply_latex_template(LATEX_STUDENT_TEMPLATE, replacements)
 
 
 def build_student_latex_assets(exam_set: dict[str, Any], variant: dict[str, Any]) -> dict[str, bytes]:
+    assets = build_latex_font_assets()
     exam_set_id = str(exam_set.get("examSetId") or "").strip()
     variant_id = str(variant.get("variantId") or "").strip()
     if not exam_set_id or not variant_id:
-        return {}
-    return {
-        LATEX_VARIANT_QR_ASSET_NAME: build_variant_qr_pdf_bytes(exam_set_id, variant_id),
-    }
+        return assets
+    assets[LATEX_VARIANT_QR_ASSET_NAME] = build_variant_qr_pdf_bytes(exam_set_id, variant_id)
+    return assets
 
 
 def build_question_pool_latex_document(
@@ -1881,8 +1987,8 @@ def summarize_latex_failure(output: str) -> str:
     return condensed[-800:] if condensed else "No LaTeX engine output was captured."
 
 
-def latex_engine_candidates() -> list[str]:
-    return [engine for engine in LATEX_ENGINES if shutil.which(engine)]
+def latex_engine_available() -> bool:
+    return shutil.which(LATEX_ENGINE) is not None
 
 
 def compile_latex_with_engine(
@@ -1900,7 +2006,9 @@ def compile_latex_with_engine(
             log_path = temp_dir / f"{job_name}.log"
             tex_path.write_text(tex_content, encoding="utf-8")
             for asset_name, asset_bytes in (assets or {}).items():
-                (temp_dir / asset_name).write_bytes(asset_bytes)
+                asset_path = temp_dir / asset_name
+                asset_path.parent.mkdir(parents=True, exist_ok=True)
+                asset_path.write_bytes(asset_bytes)
 
             command = [
                 engine,
@@ -1938,27 +2046,16 @@ def render_latex_to_pdf(
     job_name: str,
     assets: dict[str, bytes] | None = None,
 ) -> bytes:
-    engines = latex_engine_candidates()
-    if not engines:
+    if not latex_engine_available():
         raise OSError(
-            "No LaTeX engine was found in PATH. Install TeX Live or another LaTeX distribution."
+            f"{LATEX_ENGINE} was not found in PATH. Install texlive-luatex."
         )
-
-    failures: list[str] = []
-    for engine in engines:
-        try:
-            return compile_latex_with_engine(
-                tex_content,
-                job_name=job_name,
-                engine=engine,
-                assets=assets,
-            )
-        except ValueError as error:
-            failures.append(str(error))
-            continue
-
-    detail = "; ".join(failures)
-    raise ValueError(detail or "LaTeX compilation failed for all available engines.")
+    return compile_latex_with_engine(
+        tex_content,
+        job_name=job_name,
+        engine=LATEX_ENGINE,
+        assets=assets if assets is not None else build_latex_font_assets(),
+    )
 
 
 def render_printable_html(title: str, subtitle: str, body_html: str) -> str:
@@ -2172,11 +2269,11 @@ def render_question_pool_html(exam_set: dict[str, Any], question_pool: list[dict
             )
             for choice in question["choices"]
         )
-        chapters = ", ".join(question["chapters"]) or "—"
+        sources = ", ".join(question.get("sources") or question.get("chapters") or []) or "—"
         question_sections.append(
             f"""
 <section class="question">
-  <div class="question-head">Question {index} · {html.escape(question['sourceQuestionId'])} · Difficulty {question['difficulty']} · {question['points']} pt · Chapters {html.escape(chapters)}</div>
+  <div class="question-head">Question {index} · {html.escape(question['sourceQuestionId'])} · Difficulty {question['difficulty']} · {question['points']} pt · Sources {html.escape(sources)}</div>
   <p class="question-title" data-rich-text>{html.escape(question['question'])}</p>
   <ul class="choice-list">{choices}</ul>
 </section>
@@ -2754,12 +2851,17 @@ def build_omr_sheet_config(
         (len(question.get("displayChoices", [])) for question in questions),
         default=0,
     )
+    omr_title_parts = [
+        str(print_settings["courseName"]).strip(),
+        str(print_settings["examName"]).strip(),
+    ]
+    omr_title = " - ".join(part for part in omr_title_parts if part) or "Optical Mark Recognition Sheet"
     return SheetConfig(
         question_count=len(questions),
         choice_count=choice_count,
         exam_set_id=str(exam_set["examSetId"]),
         variant_id=str(variant["variantId"]),
-        title=print_settings["examName"] or "Optical Mark Recognition Sheet",
+        title=omr_title,
         instructions=print_settings["omrInstructions"],
     )
 

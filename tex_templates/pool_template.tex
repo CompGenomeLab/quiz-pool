@@ -1,10 +1,10 @@
 \documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
-\usepackage[T1]{fontenc}
-\IfFileExists{lmodern.sty}{\usepackage{lmodern}}{}
+\usepackage{fontspec}
+\usepackage{unicode-math}
 \usepackage{microtype}
-\usepackage{amsmath,amssymb}
+\usepackage{amsmath}
 \usepackage{array}
 \newif\ifquizpoolenumitem
 \IfFileExists{enumitem.sty}{\usepackage{enumitem}\quizpoolenumitemtrue}{\quizpoolenumitemfalse}
@@ -19,6 +19,14 @@
 \definecolor{PrismGray}{HTML}{F4F6F8}
 
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\defaultfontfeatures{Ligatures=TeX}
+\setmainfont{lmroman10-regular.otf}[
+  BoldFont=lmroman10-bold.otf,
+  ItalicFont=lmroman10-italic.otf,
+  BoldItalicFont=lmroman10-bolditalic.otf,
+]
+\setmathfont{latinmodern-math.otf}
 
 \newcommand{\institution}{%%QUIZPOOL_INSTITUTION%%}
 \newcommand{\coursename}{%%QUIZPOOL_COURSE%%}
