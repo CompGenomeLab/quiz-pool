@@ -21,7 +21,7 @@ const state = {
 };
 
 const DEFAULT_EXAM_RULES = [
-  "Fully fill bubbles. Do not leave any Student ID field blank. Include leading zeros.",
+  "Fully fill bubbles. Do not leave any Student ID column blank. Include leading zeros.",
   "Read every question carefully and select all correct answers for each question.",
   "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
   "Do not communicate with other students or use unauthorized materials during the exam.",
