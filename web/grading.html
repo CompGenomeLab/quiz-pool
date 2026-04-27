@@ -21,9 +21,10 @@
         </p>
         <label class="field field--full">
           <span>Output Folder Path</span>
-          <input id="annotate-output-path" type="text" placeholder="/absolute/path/to/annotated" />
+          <input id="annotate-output-path" type="text" readonly />
         </label>
         <div class="panel__actions">
+          <button id="browse-annotate-output" class="button button--ghost" type="button">Browse Folders</button>
           <button id="cancel-annotate-modal" class="button button--ghost" type="button">Cancel</button>
           <button id="confirm-annotate-modal" class="button button--primary" type="button">Run OMR Annotate</button>
         </div>
@@ -61,26 +62,27 @@
             <p class="eyebrow">Inputs</p>
             <h2>Scan Source</h2>
             <p class="helper-copy">
-              Enter a local PDF path or a local directory path containing filled OMR sheet PDFs on this machine.
+              Choose a local PDF or a directory containing filled OMR sheet PDFs on this machine.
             </p>
           </div>
 
           <div class="status-card">
-            <p class="status-card__label">Quiz Database</p>
+            <p class="status-card__label">Project DB</p>
             <p id="db-path" class="status-card__value"></p>
-            <p class="status-card__label">Exam Store</p>
+            <p class="status-card__label">Generated Exams</p>
             <p id="exam-store-path" class="status-card__value"></p>
             <p id="grading-status" class="status-card__hint">Loading grading tools...</p>
           </div>
 
           <div class="stack">
             <label class="field field--full">
-              <span>PDF Or Directory Path</span>
-              <input id="grading-input-path" type="text" placeholder="/absolute/path/to/scans or /path/file.pdf" />
+              <span>PDF Or Directory</span>
+              <input id="grading-input-path" type="text" readonly />
             </label>
           </div>
 
           <div class="sidebar__actions">
+            <button id="browse-grading-input" class="button button--ghost" type="button">Browse Files</button>
             <button id="run-grading" class="button button--primary" type="button">Run Grading</button>
           </div>
         </aside>

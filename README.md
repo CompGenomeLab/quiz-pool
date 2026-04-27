@@ -1,6 +1,6 @@
 <img src="img/quiz_pool.png" alt="Quiz Pool">
 
-Quiz Pool is a schema-driven web app for authoring question banks, generating exam variants, printing OMR-ready PDFs, viewing saved exam sets, and grading completed papers.
+Quiz Pool is a web app for authoring validated question banks, generating exam variants, printing OMR-ready PDFs, viewing saved exam sets, and grading completed papers.
 
 ## Requirements
 
@@ -20,10 +20,18 @@ uv sync
 Install the required system tools:
 
 - TeX Live users should install a LuaLaTeX-capable setup with the standard LaTeX collections used by the templates, at minimum `collection-luatex`, `collection-latexrecommended`, and `collection-latexextra`
+
 - Debian/Ubuntu example:
 
 ```bash
 sudo apt install texlive-luatex texlive-latex-recommended texlive-latex-extra poppler-utils
+```
+
+- Mac users can install TeX Live with Homebrew:
+
+```bash
+brew install --cask mactex
+brew install poppler
 ```
 
 Additional notes:
@@ -35,7 +43,7 @@ Additional notes:
 ## Run
 
 ```bash
-uv run quiz_pool --db sample_quiz.json
+uv run quiz_pool --project sample_quiz.quizpool
 ```
 
 Then open `http://127.0.0.1:8000`.
@@ -44,19 +52,19 @@ Useful CLI flags:
 
 ```bash
 uv run quiz_pool \
-  --db path/to/quiz.json \
-  --schema scheme.json \
-  --exam-store path/to/generated_exams.json \
+  --project path/to/course.quizpool \
   --host 127.0.0.1 \
   --port 8000
 ```
 
-If `--exam-store` is omitted, the app uses `generated_exams.json` next to the selected quiz file.
+The app stores normal work in the `.quizpool` project database: quiz content, generated exam sets,
+the exam-generator draft, and uploaded question images. A new project starts empty. Use the
+Editor's import action to bulk import a quiz JSON into the active project.
 
 ## Web Interface
 
-- `Welcome`: choose the active quiz DB JSON and exam DB JSON for the current server session
-- `Editor`: edit quiz metadata, learning objectives, questions, choices, points, explanations, and references
+- `Welcome`: choose the active `.quizpool` project DB for the current server session
+- `Editor`: edit quiz metadata, bulk import quiz JSON, learning objectives, questions, choices, points, explanations, and references
 - `Exam Generator`: filter the pool, generate saved exam sets, preview variants, and download printable PDFs
 - `Exam Viewer`: reopen saved exam sets, inspect variants, and re-download the printable ZIP
 - `Grading`: run `omr-grade`, review mismatches, export CSV, and generate annotated PDFs with `omr-annotate`
@@ -88,6 +96,7 @@ Each question supports:
 - one or more linked learning objectives
 - one or more references
 - optional explanation
+- optional PNG/JPEG images attached to each question
 
 Learning objectives are editable in the Editor and use IDs like `LO1`, `LO2`, `LO3`, ...
 
@@ -112,8 +121,8 @@ For grading and annotation, make sure `pdftoppm` is installed and available on `
 
 ## Notes
 
-- The quiz DB must exist and be schema-valid at startup
-- The exam store file may be missing or empty; the app will treat that as an empty store
+- A new project DB starts with an empty quiz and no generated exams
+- Quiz JSON import happens from the Editor and copies the quiz into the active project DB
 - Invalid quiz edits are rejected on save and shown in the UI
 - The browser shows a native warning for tab close or reload when the Editor has unsaved changes
 - If printable export fails with a LaTeX error, check that `lualatex` is installed and that the vendored assets under `tex_templates/` are still present

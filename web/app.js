@@ -1,3 +1,4 @@
+import { browseFile } from "./file-browser.js";
 import { hasRichTextMarkup, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
 
 const state = {
@@ -34,11 +35,14 @@ const elements = {
   errorList: document.querySelector("#error-list"),
   errorPanel: document.querySelector("#error-panel"),
   learningObjectives: document.querySelector("#learning-objectives"),
+  importQuizJson: document.querySelector("#import-quiz-json"),
   metaPanelBody: document.querySelector("#meta-panel-body"),
   questionDifficulty: document.querySelector("#question-difficulty"),
   questionEditor: document.querySelector("#question-editor"),
   questionHeading: document.querySelector("#question-heading"),
   questionId: document.querySelector("#question-id"),
+  questionImages: document.querySelector("#question-images"),
+  questionImageUpload: document.querySelector("#question-image-upload"),
   questionTextPreview: document.querySelector("#question-text-preview"),
   questionPoints: document.querySelector("#question-points"),
   questionList: document.querySelector("#question-list"),
@@ -201,6 +205,9 @@ function normalizeQuestionDraft(question = {}) {
     points: clampPoints(question.points),
     difficulty: clampDifficulty(question.difficulty),
     explanation: question.explanation ?? "",
+    imageAssetIds: Array.isArray(question.imageAssetIds)
+      ? question.imageAssetIds.filter((assetId) => typeof assetId === "string" && assetId.trim() !== "")
+      : [],
   };
 }
 
@@ -333,7 +340,7 @@ function renderLearningObjectives() {
     fragment.append(node);
   }
   elements.learningObjectives.replaceChildren(fragment);
-  elements.removeObjective.disabled = state.quiz.learningObjectives.length <= 1;
+  elements.removeObjective.disabled = state.quiz.learningObjectives.length === 0;
 }
 
 function renderQuestionObjectiveLinks() {
@@ -467,6 +474,86 @@ function renderLocations(question) {
   elements.locations.replaceChildren(fragment);
 }
 
+function assetUrl(assetId) {
+  return `/api/assets/${encodeURIComponent(assetId)}`;
+}
+
+function renderQuestionImages(question) {
+  const fragment = document.createDocumentFragment();
+  const imageAssetIds = question?.imageAssetIds ?? [];
+
+  if (imageAssetIds.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "helper-copy";
+    empty.textContent = "No images attached.";
+    fragment.append(empty);
+  }
+
+  imageAssetIds.forEach((assetId, index) => {
+    const item = document.createElement("div");
+    item.className = "question-image-item";
+
+    const image = document.createElement("img");
+    image.className = "question-image-item__preview";
+    image.src = assetUrl(assetId);
+    image.alt = `Question image ${index + 1}`;
+    image.loading = "lazy";
+
+    const actions = document.createElement("div");
+    actions.className = "question-image-item__actions";
+
+    const moveUp = document.createElement("button");
+    moveUp.type = "button";
+    moveUp.className = "button button--tiny button--ghost";
+    moveUp.textContent = "Up";
+    moveUp.disabled = index === 0;
+    moveUp.addEventListener("click", () => {
+      updateSelectedQuestion((draft) => {
+        [draft.imageAssetIds[index - 1], draft.imageAssetIds[index]] = [
+          draft.imageAssetIds[index],
+          draft.imageAssetIds[index - 1],
+        ];
+        return draft;
+      });
+      render();
+    });
+
+    const moveDown = document.createElement("button");
+    moveDown.type = "button";
+    moveDown.className = "button button--tiny button--ghost";
+    moveDown.textContent = "Down";
+    moveDown.disabled = index === imageAssetIds.length - 1;
+    moveDown.addEventListener("click", () => {
+      updateSelectedQuestion((draft) => {
+        [draft.imageAssetIds[index], draft.imageAssetIds[index + 1]] = [
+          draft.imageAssetIds[index + 1],
+          draft.imageAssetIds[index],
+        ];
+        return draft;
+      });
+      render();
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "button button--tiny button--danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      updateSelectedQuestion((draft) => {
+        draft.imageAssetIds.splice(index, 1);
+        return draft;
+      });
+      render();
+    });
+
+    actions.append(moveUp, moveDown, remove);
+    item.append(image, actions);
+    fragment.append(item);
+  });
+
+  elements.questionImages.replaceChildren(fragment);
+}
+
 function renderQuestionPreviews(question) {
   renderRichTextIntoElement(elements.questionTextPreview, question?.question || "—");
   renderRichTextIntoElement(elements.questionExplanationPreview, question?.explanation || "—");
@@ -478,7 +565,7 @@ function renderQuestionEditor() {
 
   elements.emptyState.classList.toggle("hidden", hasQuestion);
   elements.questionEditor.classList.toggle("hidden", !hasQuestion);
-  elements.deleteQuestion.disabled = !hasQuestion || state.quiz.questions.length === 1;
+  elements.deleteQuestion.disabled = !hasQuestion;
 
   if (!hasQuestion) {
     elements.questionHeading.textContent = "Select a question";
@@ -486,6 +573,7 @@ function renderQuestionEditor() {
     renderQuestionObjectiveLinks();
     elements.choicesEditor.replaceChildren();
     elements.locations.replaceChildren();
+    elements.questionImages.replaceChildren();
     renderQuestionPreviews(null);
     return;
   }
@@ -503,6 +591,7 @@ function renderQuestionEditor() {
   renderChoices(draft);
   renderQuestionObjectiveLinks();
   renderLocations(draft);
+  renderQuestionImages(draft);
   renderQuestionPreviews(draft);
 }
 
@@ -603,6 +692,66 @@ async function saveQuiz() {
   setStatus(`Saved at ${new Date().toLocaleTimeString()}.`);
 }
 
+async function importQuizJson(path) {
+  setStatus("Importing quiz JSON...");
+  const response = await fetch("/api/quiz/import-json", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ path }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    state.validationErrors = payload.errors ?? [{ path: "<import>", message: "Import failed" }];
+    renderErrors();
+    setStatus("Import failed. Review the validation messages.", true);
+    return;
+  }
+  state.quiz = payload.quiz;
+  state.dbPath = payload.projectPath ?? payload.dbPath;
+  state.lastSavedSnapshot = snapshotQuiz(payload.quiz);
+  state.isDirty = false;
+  state.selectedQuestionIndex = 0;
+  state.validationErrors = [];
+  render();
+  setStatus("Quiz JSON imported into the project DB.");
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.slice(result.indexOf(",") + 1) : result);
+    }, { once: true });
+    reader.addEventListener("error", () => {
+      reject(reader.error || new Error("Could not read image file."));
+    }, { once: true });
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadImageAsset(file) {
+  const dataBase64 = await readFileAsBase64(file);
+  const response = await fetch("/api/assets", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      filename: file.name,
+      mimeType: file.type,
+      dataBase64,
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.errors?.[0]?.message ?? `Image upload failed (${response.status})`);
+  }
+  return payload.asset;
+}
+
 function wireGlobalFields() {
   elements.cancelUnsavedNav.addEventListener("click", () => {
     closeUnsavedNavModal();
@@ -695,6 +844,40 @@ function wireGlobalFields() {
     renderQuestionPreviews(getSelectedQuestion());
   });
 
+  elements.importQuizJson.addEventListener("click", async () => {
+    const selectedPath = await browseFile({
+      title: "Import Quiz JSON",
+      purpose: "quiz-json",
+    });
+    if (!selectedPath) {
+      return;
+    }
+    await importQuizJson(selectedPath);
+  });
+
+  elements.questionImageUpload.addEventListener("change", async (event) => {
+    const files = [...(event.target.files ?? [])];
+    event.target.value = "";
+    if (files.length === 0 || !state.quiz || !getSelectedQuestion()) {
+      return;
+    }
+    try {
+      setStatus("Uploading image...");
+      const uploadedAssets = [];
+      for (const file of files) {
+        uploadedAssets.push(await uploadImageAsset(file));
+      }
+      updateSelectedQuestion((draft) => {
+        draft.imageAssetIds.push(...uploadedAssets.map((asset) => asset.assetId));
+        return draft;
+      });
+      render();
+      setStatus("Image uploaded. Save the quiz to persist the attachment.");
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+
   elements.addObjective.addEventListener("click", () => {
     if (!state.quiz) {
       return;
@@ -712,8 +895,11 @@ function wireGlobalFields() {
     if (!state.quiz) {
       return;
     }
-    if (state.quiz.learningObjectives.length <= 1) {
-      setStatus("At least one learning objective must remain in the quiz.", true);
+    if (state.quiz.learningObjectives.length === 0) {
+      return;
+    }
+    if (state.quiz.learningObjectives.length === 1 && state.quiz.questions.length > 0) {
+      setStatus("At least one learning objective must remain while questions exist.", true);
       return;
     }
 
@@ -739,6 +925,12 @@ function wireGlobalFields() {
     if (!state.quiz) {
       return;
     }
+    if (state.quiz.learningObjectives.length === 0) {
+      state.quiz.learningObjectives.push({
+        id: nextLearningObjectiveId(),
+        label: "",
+      });
+    }
     const newQuestion = normalizeQuestionDraft({
       id: nextQuestionId(),
       learningObjectiveIds: state.quiz.learningObjectives.slice(0, 1).map((objective) => objective.id),
@@ -758,16 +950,14 @@ function wireGlobalFields() {
     if (!state.quiz) {
       return;
     }
-    if (state.quiz.questions.length === 1) {
-      setStatus("At least one question must remain in the quiz.", true);
-      return;
-    }
     const index = currentQuestionIndex();
     if (index === -1) {
       return;
     }
     state.quiz.questions.splice(index, 1);
-    state.selectedQuestionIndex = Math.max(0, Math.min(index, state.quiz.questions.length - 1));
+    state.selectedQuestionIndex = state.quiz.questions.length === 0
+      ? 0
+      : Math.max(0, Math.min(index, state.quiz.questions.length - 1));
     recordQuizMutation();
     render();
     setStatus("Question removed. Save to persist the deletion.");

@@ -32,7 +32,7 @@
           <h1>Question Editor</h1>
           <p class="sidebar__copy">
             Edit the quiz JSON file directly from the browser.<br />
-            Saves are validated against the schema.
+            Saves are validated against the built-in rules.
           </p>
         </div>
         <nav class="page-links">
@@ -57,6 +57,7 @@
           <div class="sidebar__actions">
             <button id="add-question" class="button button--primary" type="button">Add Question</button>
             <button id="reload-quiz" class="button button--ghost" type="button">Reload</button>
+            <button id="import-quiz-json" class="button button--ghost" type="button">Import Quiz JSON</button>
           </div>
 
           <div id="reload-notice" class="notice notice--warning hidden" role="alert">
@@ -69,7 +70,7 @@
           </div>
 
           <div class="status-card">
-            <p class="status-card__label">Database</p>
+            <p class="status-card__label">Project DB</p>
             <p id="db-path" class="status-card__value"></p>
             <p id="save-status" class="status-card__hint">Loading quiz data...</p>
           </div>
@@ -188,6 +189,18 @@
                   <div id="question-text-preview" class="rich-preview question-detail-sheet__copy"></div>
                 </div>
 
+                <section class="card field--full">
+                  <div class="panel__subhead">
+                    <h3>Images</h3>
+                    <p>Attach PNG or JPEG images to this question. They appear after the prompt in previews and printables.</p>
+                  </div>
+                  <div id="question-images" class="question-image-list"></div>
+                  <label class="button button--ghost question-image-upload">
+                    <span>Upload Image</span>
+                    <input id="question-image-upload" type="file" accept="image/png,image/jpeg" multiple />
+                  </label>
+                </section>
+
                 <label class="field field--full">
                   <span>Explanation</span>
                   <textarea id="question-explanation" rows="3"></textarea>
@@ -202,7 +215,7 @@
                 <section class="card">
                   <div class="panel__subhead">
                     <h3>Choices</h3>
-                    <p>Pick one or more correct answers. Questions can have 2 to 5 choices.</p>
+                    <p>Pick one or more correct answers. Questions can have 2 to 5 choices. Wrap formulas with <code>[math]...[/math]</code> to render them dynamically.</p>
                   </div>
                   <div class="choice-actions">
                     <button id="add-choice" class="button button--ghost" type="button">Add Choice</button>

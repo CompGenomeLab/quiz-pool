@@ -156,6 +156,48 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function assetUrl(assetId) {
+  return `/api/assets/${encodeURIComponent(assetId)}`;
+}
+
+function questionImageAssetIds(question = {}) {
+  return Array.isArray(question.imageAssetIds)
+    ? question.imageAssetIds.filter((assetId) => typeof assetId === "string" && assetId.trim() !== "")
+    : [];
+}
+
+function createQuestionImagePreviews(question) {
+  const imageAssetIds = questionImageAssetIds(question);
+  if (imageAssetIds.length === 0) {
+    return null;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "question-image-list";
+  imageAssetIds.forEach((assetId, index) => {
+    const image = document.createElement("img");
+    image.className = "question-image-preview";
+    image.src = assetUrl(assetId);
+    image.alt = `Question image ${index + 1}`;
+    image.loading = "lazy";
+    wrap.append(image);
+  });
+  return wrap;
+}
+
+function renderQuestionImageHtml(question) {
+  const images = questionImageAssetIds(question);
+  if (images.length === 0) {
+    return "";
+  }
+  return `
+    <div class="question-image-list">
+      ${images.map((assetId, index) => `
+        <img class="question-image-preview" src="${assetUrl(assetId)}" alt="Question image ${index + 1}" loading="lazy" />
+      `).join("")}
+    </div>
+  `;
+}
+
 function parseExamRules(value) {
   return value
     .split(/\r?\n/u)
@@ -380,6 +422,7 @@ function renderFilterGroups() {
           : state.selection.sources.filter((item) => item !== source);
         state.selection.sources = dedupe(state.selection.sources);
         renderPoolState();
+        scheduleDraftSave();
       }),
     );
   }
@@ -394,6 +437,7 @@ function renderFilterGroups() {
           : state.selection.difficulties.filter((item) => item !== difficulty);
         state.selection.difficulties = dedupe(state.selection.difficulties).sort((left, right) => left - right);
         renderPoolState();
+        scheduleDraftSave();
       }),
     );
   }
@@ -411,6 +455,7 @@ function renderFilterGroups() {
             : state.selection.learningObjectiveIds.filter((item) => item !== objective.id);
           state.selection.learningObjectiveIds = dedupe(state.selection.learningObjectiveIds);
           renderPoolState();
+          scheduleDraftSave();
         },
       ),
     );
@@ -493,6 +538,7 @@ function renderPoolTable() {
         state.selection.overrides[question.id] = nextValue;
       }
       renderPoolState();
+      scheduleDraftSave();
     });
     select.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -572,6 +618,7 @@ function renderPoolQuestionModal() {
     <section class="question-detail-sheet__block">
       <h3>Prompt</h3>
       <div class="question-detail-sheet__copy">${renderRichTextHtml(question.question)}</div>
+      ${renderQuestionImageHtml(question)}
     </section>
     <section class="question-detail-sheet__block">
       <h3>Coverage</h3>
@@ -762,6 +809,7 @@ function renderGeneratedRun() {
       const title = document.createElement("p");
       title.className = "question-preview__title";
       renderRichTextIntoElement(title, question.question);
+      const imagePreviews = createQuestionImagePreviews(question);
 
       const choices = document.createElement("ul");
       choices.className = "choice-list";
@@ -780,7 +828,11 @@ function renderGeneratedRun() {
         choices.append(item);
       }
 
-      section.append(questionHead, title, choices);
+      section.append(questionHead, title);
+      if (imagePreviews) {
+        section.append(imagePreviews);
+      }
+      section.append(choices);
       questionList.append(section);
     }
 
@@ -788,6 +840,120 @@ function renderGeneratedRun() {
     variantFragment.append(card);
   }
   elements.variantPreviews.replaceChildren(variantFragment);
+}
+
+function currentDraft() {
+  return {
+    selection: {
+      questionCount: state.selection.questionCount,
+      variantCount: state.selection.variantCount,
+      sources: [...state.selection.sources],
+      difficulties: [...state.selection.difficulties],
+      learningObjectiveIds: [...state.selection.learningObjectiveIds],
+      overrides: { ...state.selection.overrides },
+    },
+    statusSortDirection: state.statusSortDirection,
+    printableMetadata: printableMetadata(),
+    lastGeneratedExamSetId: state.generatedRun?.examSetId ?? "",
+  };
+}
+
+let draftSaveTimer = null;
+
+function scheduleDraftSave() {
+  if (!state.quiz) {
+    return;
+  }
+  window.clearTimeout(draftSaveTimer);
+  draftSaveTimer = window.setTimeout(async () => {
+    try {
+      await fetch("/api/generator-draft", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(currentDraft()),
+      });
+    } catch (error) {
+      console.warn("Could not save generator draft", error);
+    }
+  }, 350);
+}
+
+async function loadGeneratorDraft() {
+  const response = await fetch("/api/generator-draft");
+  if (!response.ok) {
+    return null;
+  }
+  const payload = await response.json();
+  return payload.draft && typeof payload.draft === "object" ? payload.draft : null;
+}
+
+function applyGeneratorDraft(draft) {
+  if (!draft || !state.quiz) {
+    return;
+  }
+  const selection = draft.selection && typeof draft.selection === "object" ? draft.selection : {};
+  const options = filterOptions();
+  const sourceSet = new Set(options.sources);
+  const difficultySet = new Set(options.difficulties);
+  const objectiveSet = new Set(options.learningObjectives.map((objective) => objective.id));
+  const questionIdSet = new Set(state.quiz.questions.map((question) => question.id));
+
+  const questionCount = Number.parseInt(selection.questionCount, 10);
+  const variantCount = Number.parseInt(selection.variantCount, 10);
+  state.selection.questionCount = Math.min(
+    MAX_QUESTIONS_PER_EXAM,
+    Math.max(1, Number.isFinite(questionCount) ? questionCount : state.selection.questionCount),
+  );
+  state.selection.variantCount = Math.max(1, Number.isFinite(variantCount) ? variantCount : state.selection.variantCount);
+  state.selection.sources = Array.isArray(selection.sources)
+    ? dedupe(selection.sources.filter((source) => sourceSet.has(source)))
+    : [];
+  state.selection.difficulties = Array.isArray(selection.difficulties)
+    ? dedupe(selection.difficulties.filter((difficulty) => difficultySet.has(difficulty))).sort((left, right) => left - right)
+    : [];
+  state.selection.learningObjectiveIds = Array.isArray(selection.learningObjectiveIds)
+    ? dedupe(selection.learningObjectiveIds.filter((objectiveId) => objectiveSet.has(objectiveId)))
+    : [];
+  state.selection.overrides = {};
+  if (selection.overrides && typeof selection.overrides === "object") {
+    for (const [questionId, mode] of Object.entries(selection.overrides)) {
+      if (questionIdSet.has(questionId) && (mode === "include" || mode === "exclude")) {
+        state.selection.overrides[questionId] = mode;
+      }
+    }
+  }
+
+  const metadata = draft.printableMetadata && typeof draft.printableMetadata === "object" ? draft.printableMetadata : {};
+  elements.institutionName.value = typeof metadata.institutionName === "string" ? metadata.institutionName : elements.institutionName.value;
+  elements.examName.value = typeof metadata.examName === "string" ? metadata.examName : elements.examName.value;
+  elements.courseName.value = typeof metadata.courseName === "string" ? metadata.courseName : elements.courseName.value;
+  elements.examDate.value = typeof metadata.examDate === "string" ? metadata.examDate : elements.examDate.value;
+  elements.startTime.value = typeof metadata.startTime === "string" ? metadata.startTime : elements.startTime.value;
+  elements.totalTimeMinutes.value = Number.isInteger(metadata.totalTimeMinutes) ? String(metadata.totalTimeMinutes) : elements.totalTimeMinutes.value;
+  elements.instructor.value = typeof metadata.instructor === "string" ? metadata.instructor : elements.instructor.value;
+  elements.allowedMaterials.value = typeof metadata.allowedMaterials === "string" ? metadata.allowedMaterials : elements.allowedMaterials.value;
+  elements.omrInstructions.value = typeof metadata.omrInstructions === "string" ? metadata.omrInstructions : elements.omrInstructions.value;
+  elements.examRules.value = Array.isArray(metadata.examRules) ? metadata.examRules.join("\n") : elements.examRules.value;
+  state.statusSortDirection = draft.statusSortDirection === "reverse" ? "reverse" : "default";
+}
+
+async function restoreGeneratedRunFromDraft(draft) {
+  const examSetId = typeof draft?.lastGeneratedExamSetId === "string" ? draft.lastGeneratedExamSetId.trim() : "";
+  if (!examSetId) {
+    return;
+  }
+  try {
+    const response = await fetch(`/api/exams/set/${encodeURIComponent(examSetId)}`);
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    state.generatedRun = payload.examSet;
+  } catch (error) {
+    console.warn("Could not restore generated exam set", error);
+  }
 }
 
 async function loadQuiz() {
@@ -814,8 +980,11 @@ async function loadQuiz() {
       elements.omrInstructions.value.trim() || DEFAULT_OMR_INSTRUCTIONS,
     ).join("\n");
   }
-  elements.dbPath.textContent = state.dbPath;
-  elements.examStorePath.textContent = state.examStorePath;
+  const draft = await loadGeneratorDraft();
+  applyGeneratorDraft(draft);
+  await restoreGeneratedRunFromDraft(draft);
+  elements.dbPath.textContent = payload.projectPath ?? state.dbPath;
+  elements.examStorePath.textContent = payload.projectPath ?? state.examStorePath;
   elements.questionCount.value = String(state.selection.questionCount);
   elements.variantCount.value = String(state.selection.variantCount);
   renderPoolState();
@@ -871,6 +1040,7 @@ async function generateExams() {
   state.validationErrors = [];
   renderErrors();
   renderGeneratedRun();
+  scheduleDraftSave();
   setStatus(`Generated ${result.variants.length} variant(s) for exam set ${result.examSetId}.`);
 }
 
@@ -917,6 +1087,22 @@ async function downloadPrintableZip() {
 }
 
 function wireEvents() {
+  for (const element of [
+    elements.institutionName,
+    elements.examName,
+    elements.courseName,
+    elements.examDate,
+    elements.startTime,
+    elements.totalTimeMinutes,
+    elements.instructor,
+    elements.allowedMaterials,
+    elements.examRules,
+  ]) {
+    element.addEventListener("input", () => {
+      scheduleDraftSave();
+    });
+  }
+
   elements.omrInstructions.addEventListener("input", () => {
     const currentRules = parseExamRules(elements.examRules.value);
     const omrInstructions = elements.omrInstructions.value.trim() || DEFAULT_OMR_INSTRUCTIONS;
@@ -927,6 +1113,7 @@ function wireEvents() {
     ) {
       elements.examRules.value = defaultExamRules(omrInstructions).join("\n");
     }
+    scheduleDraftSave();
   });
 
   elements.questionCount.addEventListener("input", (event) => {
@@ -947,10 +1134,12 @@ function wireEvents() {
       setStatus("Quiz pool loaded.");
     }
     event.target.value = String(state.selection.questionCount);
+    scheduleDraftSave();
   });
 
   elements.variantCount.addEventListener("input", (event) => {
     state.selection.variantCount = Math.max(1, Number.parseInt(event.target.value || "1", 10));
+    scheduleDraftSave();
   });
 
   elements.generateExams.addEventListener("click", async () => {
@@ -968,12 +1157,14 @@ function wireEvents() {
   elements.resetOverrides.addEventListener("click", () => {
     state.selection.overrides = {};
     renderPoolState();
+    scheduleDraftSave();
     setStatus("Question overrides reset.");
   });
 
   elements.sortStatus.addEventListener("click", () => {
     state.statusSortDirection = state.statusSortDirection === "default" ? "reverse" : "default";
     renderPoolTable();
+    scheduleDraftSave();
   });
 
   elements.closePoolQuestion.addEventListener("click", () => {

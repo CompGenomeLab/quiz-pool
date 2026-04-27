@@ -1,6 +1,6 @@
 {
   "title": "Random General Knowledge Mini Quiz",
-  "description": "A sample general-knowledge quiz pool with multiple dummy questions generated to match scheme.json.",
+  "description": "A sample general-knowledge quiz pool with multiple dummy questions generated to match the built-in quiz format.",
   "learningObjectives": [
     {
       "id": "LO1",

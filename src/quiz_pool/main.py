@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import binascii
+import hashlib
 import html
 import io
 import json
@@ -11,6 +13,7 @@ import mimetypes
 import random
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
@@ -19,7 +22,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 import zipfile
 
@@ -38,8 +41,9 @@ SRC_ROOT = PACKAGE_ROOT.parent
 ROOT = SRC_ROOT.parent
 WEB_ROOT = ROOT / "web"
 DEFAULT_DB = ROOT / "sample_quiz.json"
-DEFAULT_SCHEMA = ROOT / "scheme.json"
-DEFAULT_EXAM_STORE_NAME = "generated_exams.json"
+INTERNAL_SCHEMA_PATH = PACKAGE_ROOT / "schemas" / "scheme.json"
+DEFAULT_PROJECT_SUFFIX = ".quizpool"
+PROJECT_SCHEMA_VERSION = "1"
 DISPLAY_KEYS = ("A", "B", "C", "D", "E")
 DEFAULT_PRINTABLE_FOLDER = "exam-printables"
 QUESTION_POOL_PRINTABLE_NAME = "question-pool.pdf"
@@ -69,6 +73,8 @@ DEFAULT_EXAM_RULES = [
     "Remain seated until instructed to stop and submit your paper.",
 ]
 GRADE_ALLOWED_LABELS = set(DISPLAY_KEYS)
+ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
+IMAGE_ASSET_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg"}
 MATH_TAG_PATTERN = re.compile(r"\[math\]([\s\S]*?)\[/math\]", re.IGNORECASE)
 LATEX_TEXT_ESCAPES = {
     "\\": r"\textbackslash{}",
@@ -97,21 +103,26 @@ def default_exam_rules(omr_instructions: str = DEFAULT_OMR_INSTRUCTIONS) -> list
 @dataclass
 class AppState:
     db_path: Path
-    schema_path: Path
     exam_store_path: Path
+    project_path: Path
     validator: Draft202012Validator
 
 
-def default_exam_store_path_for(db_path: Path) -> Path:
-    return (db_path.parent / DEFAULT_EXAM_STORE_NAME).resolve()
+def default_project_path_for(db_path: Path) -> Path:
+    return db_path.with_suffix(DEFAULT_PROJECT_SUFFIX).resolve()
 
 
-def display_default_db_path() -> str:
-    return str(DEFAULT_DB.relative_to(ROOT))
+def empty_quiz_document() -> dict[str, Any]:
+    return {
+        "title": "Untitled Quiz Pool",
+        "description": "",
+        "learningObjectives": [],
+        "questions": [],
+    }
 
 
-def display_default_exam_store_path() -> str:
-    return str(default_exam_store_path_for(DEFAULT_DB).relative_to(ROOT))
+def display_default_project_path() -> str:
+    return str(default_project_path_for(DEFAULT_DB).relative_to(ROOT))
 
 
 def load_json(path: Path) -> Any:
@@ -119,18 +130,435 @@ def load_json(path: Path) -> Any:
         return json.load(handle)
 
 
-def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+def load_internal_schema() -> dict[str, Any]:
+    return load_json(INTERNAL_SCHEMA_PATH)
+
+
+def utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def connect_project(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=path.parent,
-        delete=False,
-    ) as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False)
-        handle.write("\n")
-        temp_path = Path(handle.name)
-    temp_path.replace(path)
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def initialize_project_db(path: Path) -> None:
+    with connect_project(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS project_meta (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS quiz_document (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              document TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS exam_sets (
+              exam_set_id TEXT PRIMARY KEY,
+              generated_at TEXT NOT NULL,
+              document TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS generator_draft (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              draft TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS assets (
+              asset_id TEXT PRIMARY KEY,
+              filename TEXT NOT NULL,
+              mime_type TEXT NOT NULL,
+              size_bytes INTEGER NOT NULL,
+              sha256 TEXT NOT NULL,
+              width INTEGER,
+              height INTEGER,
+              created_at TEXT NOT NULL,
+              data BLOB NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO project_meta (key, value)
+            VALUES ('schemaVersion', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (PROJECT_SCHEMA_VERSION,),
+        )
+        connection.execute(
+            """
+            INSERT INTO project_meta (key, value)
+            VALUES ('updatedAt', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (utc_timestamp(),),
+        )
+
+
+def project_has_quiz(path: Path) -> bool:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        row = connection.execute("SELECT 1 FROM quiz_document WHERE id = 1").fetchone()
+    return row is not None
+
+
+def ensure_project_has_quiz(path: Path) -> None:
+    initialize_project_db(path)
+    if not project_has_quiz(path):
+        write_project_quiz(path, empty_quiz_document())
+
+
+def load_project_quiz(path: Path) -> dict[str, Any]:
+    ensure_project_has_quiz(path)
+    with connect_project(path) as connection:
+        row = connection.execute("SELECT document FROM quiz_document WHERE id = 1").fetchone()
+    if row is None:
+        raise ValueError(f"Project has no quiz document: {path}")
+    payload = json.loads(str(row["document"]))
+    if not isinstance(payload, dict):
+        raise ValueError("Project quiz document must be a JSON object")
+    return payload
+
+
+def write_project_quiz(path: Path, payload: dict[str, Any]) -> None:
+    initialize_project_db(path)
+    now = utc_timestamp()
+    document = json.dumps(payload, ensure_ascii=False)
+    with connect_project(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO quiz_document (id, document, updated_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              document = excluded.document,
+              updated_at = excluded.updated_at
+            """,
+            (document, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO project_meta (key, value)
+            VALUES ('updatedAt', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (now,),
+        )
+
+
+def load_project_exam_store(path: Path) -> dict[str, Any]:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        rows = connection.execute(
+            "SELECT document FROM exam_sets ORDER BY generated_at DESC"
+        ).fetchall()
+    exam_sets: list[dict[str, Any]] = []
+    for row in rows:
+        payload = json.loads(str(row["document"]))
+        if isinstance(payload, dict):
+            exam_sets.append(payload)
+    return {"examSets": exam_sets}
+
+
+def upsert_project_exam_set(path: Path, exam_set: dict[str, Any]) -> None:
+    initialize_project_db(path)
+    exam_set_id = str(exam_set.get("examSetId") or "").strip()
+    if not exam_set_id:
+        raise ValueError("Exam set is missing examSetId")
+    generated_at = str(exam_set.get("generatedAt") or utc_timestamp())
+    document = json.dumps(exam_set, ensure_ascii=False)
+    now = utc_timestamp()
+    with connect_project(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO exam_sets (exam_set_id, generated_at, document)
+            VALUES (?, ?, ?)
+            ON CONFLICT(exam_set_id) DO UPDATE SET
+              generated_at = excluded.generated_at,
+              document = excluded.document
+            """,
+            (exam_set_id, generated_at, document),
+        )
+        connection.execute(
+            """
+            INSERT INTO project_meta (key, value)
+            VALUES ('updatedAt', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (now,),
+        )
+
+
+def delete_project_exam_set(path: Path, exam_set_id: str) -> bool:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        cursor = connection.execute(
+            "DELETE FROM exam_sets WHERE exam_set_id = ?",
+            (exam_set_id,),
+        )
+        deleted = cursor.rowcount > 0
+        if deleted:
+            now = utc_timestamp()
+            connection.execute(
+                """
+                INSERT INTO project_meta (key, value)
+                VALUES ('updatedAt', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (now,),
+            )
+    return deleted
+
+
+def find_project_exam_set(path: Path, exam_set_id: str) -> dict[str, Any] | None:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        row = connection.execute(
+            "SELECT document FROM exam_sets WHERE exam_set_id = ?",
+            (exam_set_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    payload = json.loads(str(row["document"]))
+    return payload if isinstance(payload, dict) else None
+
+
+def load_project_generator_draft(path: Path) -> dict[str, Any] | None:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        row = connection.execute("SELECT draft FROM generator_draft WHERE id = 1").fetchone()
+    if row is None:
+        return None
+    payload = json.loads(str(row["draft"]))
+    return payload if isinstance(payload, dict) else None
+
+
+def write_project_generator_draft(path: Path, draft: dict[str, Any]) -> None:
+    initialize_project_db(path)
+    now = utc_timestamp()
+    document = json.dumps(draft, ensure_ascii=False)
+    with connect_project(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO generator_draft (id, draft, updated_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              draft = excluded.draft,
+              updated_at = excluded.updated_at
+            """,
+            (document, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO project_meta (key, value)
+            VALUES ('updatedAt', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (now,),
+        )
+
+
+def delete_project_generator_draft(path: Path) -> None:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        connection.execute("DELETE FROM generator_draft WHERE id = 1")
+
+
+def parse_image_dimensions(mime_type: str, data: bytes) -> tuple[int | None, int | None]:
+    if mime_type == "image/png" and len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    if mime_type == "image/jpeg" and data.startswith(b"\xff\xd8"):
+        index = 2
+        while index + 9 < len(data):
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            marker = data[index + 1]
+            index += 2
+            if marker in {0xD8, 0xD9}:
+                continue
+            if index + 2 > len(data):
+                break
+            segment_length = int.from_bytes(data[index:index + 2], "big")
+            if segment_length < 2 or index + segment_length > len(data):
+                break
+            if marker in {
+                0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+            } and segment_length >= 7:
+                height = int.from_bytes(data[index + 3:index + 5], "big")
+                width = int.from_bytes(data[index + 5:index + 7], "big")
+                return width, height
+            index += segment_length
+    return None, None
+
+
+def store_project_asset(
+    path: Path,
+    *,
+    filename: str,
+    mime_type: str,
+    data: bytes,
+) -> dict[str, Any]:
+    initialize_project_db(path)
+    normalized_mime_type = mime_type.strip().lower()
+    if normalized_mime_type not in ALLOWED_IMAGE_MIME_TYPES:
+        raise ValueError("Only PNG and JPEG images are supported")
+    if not data:
+        raise ValueError("Image upload is empty")
+    width, height = parse_image_dimensions(normalized_mime_type, data)
+    if width is None or height is None:
+        raise ValueError("Could not read image dimensions. Upload a valid PNG or JPEG image.")
+    asset_id = str(uuid4())
+    now = utc_timestamp()
+    digest = hashlib.sha256(data).hexdigest()
+    safe_filename = Path(filename or f"image{IMAGE_ASSET_EXTENSIONS[normalized_mime_type]}").name
+    with connect_project(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO assets (
+              asset_id, filename, mime_type, size_bytes, sha256, width, height, created_at, data
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                asset_id,
+                safe_filename,
+                normalized_mime_type,
+                len(data),
+                digest,
+                width,
+                height,
+                now,
+                sqlite3.Binary(data),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO project_meta (key, value)
+            VALUES ('updatedAt', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (now,),
+        )
+    return {
+        "assetId": asset_id,
+        "filename": safe_filename,
+        "mimeType": normalized_mime_type,
+        "sizeBytes": len(data),
+        "sha256": digest,
+        "width": width,
+        "height": height,
+        "createdAt": now,
+    }
+
+
+def get_project_asset(path: Path, asset_id: str) -> dict[str, Any] | None:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        row = connection.execute(
+            """
+            SELECT asset_id, filename, mime_type, size_bytes, sha256, width, height, created_at, data
+            FROM assets
+            WHERE asset_id = ?
+            """,
+            (asset_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "assetId": row["asset_id"],
+        "filename": row["filename"],
+        "mimeType": row["mime_type"],
+        "sizeBytes": row["size_bytes"],
+        "sha256": row["sha256"],
+        "width": row["width"],
+        "height": row["height"],
+        "createdAt": row["created_at"],
+        "data": bytes(row["data"]),
+    }
+
+
+def latex_asset_name(asset_id: str, mime_type: str) -> str:
+    extension = IMAGE_ASSET_EXTENSIONS.get(mime_type, ".img")
+    safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", asset_id)
+    return f"asset-{safe_id}{extension}"
+
+
+def file_browser_allowed(path: Path, purpose: str) -> bool:
+    if path.is_dir():
+        return True
+    suffix = path.suffix.lower()
+    if purpose == "project":
+        return suffix == DEFAULT_PROJECT_SUFFIX
+    if purpose == "quiz-json":
+        return suffix == ".json"
+    if purpose == "pdf-or-dir":
+        return suffix == ".pdf"
+    if purpose == "directory":
+        return False
+    return False
+
+
+def build_file_browser_payload(
+    *,
+    raw_path: str,
+    purpose: str,
+    fallback_path: Path,
+) -> dict[str, Any]:
+    requested = Path(raw_path).expanduser() if raw_path.strip() else fallback_path
+    current = requested.resolve()
+    if current.is_file():
+        current = current.parent
+    if not current.exists() or not current.is_dir():
+        current = fallback_path.resolve()
+    entries: list[dict[str, Any]] = []
+    try:
+        children = sorted(
+            current.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.lower()),
+        )
+    except OSError:
+        children = []
+    for child in children:
+        if child.name.startswith("."):
+            continue
+        if not file_browser_allowed(child, purpose):
+            continue
+        entries.append(
+            {
+                "name": child.name,
+                "path": str(child.resolve()),
+                "isDirectory": child.is_dir(),
+                "isFile": child.is_file(),
+            }
+        )
+    return {
+        "currentPath": str(current),
+        "parentPath": str(current.parent) if current.parent != current else "",
+        "homePath": str(Path.home()),
+        "purpose": purpose,
+        "entries": entries,
+    }
+
+
+def initialize_empty_project(project_path: Path) -> None:
+    ensure_project_has_quiz(project_path)
+
+
+def import_quiz_json_into_project(
+    *,
+    project_path: Path,
+    quiz_path: Path,
+    validator: Draft202012Validator,
+) -> dict[str, Any]:
+    validate_quiz_file(quiz_path, validator)
+    quiz = load_json(quiz_path)
+    write_project_quiz(project_path, quiz)
+    return quiz
 
 
 def validation_errors(
@@ -143,23 +571,6 @@ def validation_errors(
     return errors
 
 
-def load_exam_store(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"examSets": []}
-    if path.stat().st_size == 0:
-        return {"examSets": []}
-
-    payload = load_json(path)
-    if not isinstance(payload, dict):
-        raise ValueError("Exam store must be a JSON object")
-
-    exam_sets = payload.get("examSets")
-    if not isinstance(exam_sets, list):
-        raise ValueError("Exam store must contain an 'examSets' array")
-
-    return payload
-
-
 def validate_quiz_file(path: Path, validator: Draft202012Validator) -> None:
     if not path.is_file():
         raise ValueError(f"Quiz file not found: {path}")
@@ -170,73 +581,54 @@ def validate_quiz_file(path: Path, validator: Draft202012Validator) -> None:
         message = "; ".join(f"{item['path']}: {item['message']}" for item in errors)
         raise ValueError(f"Quiz file does not match the schema: {message}")
 
-
-def validate_exam_store_file(path: Path) -> None:
-    if path.exists():
-        load_exam_store(path)
+def load_active_quiz(state: AppState) -> dict[str, Any]:
+    return load_project_quiz(state.project_path)
 
 
-def set_active_paths(state: AppState, *, db_path: Path, exam_store_path: Path) -> None:
-    validate_quiz_file(db_path, state.validator)
-    validate_exam_store_file(exam_store_path)
-    state.db_path = db_path
-    state.exam_store_path = exam_store_path
+def write_active_quiz(state: AppState, payload: dict[str, Any]) -> None:
+    write_project_quiz(state.project_path, payload)
 
 
-def append_exam_set(path: Path, exam_set: dict[str, Any]) -> None:
-    store = load_exam_store(path)
-    store["examSets"].append(exam_set)
-    write_json_atomic(path, store)
+def load_active_exam_store(state: AppState) -> dict[str, Any]:
+    return load_project_exam_store(state.project_path)
 
 
-def delete_exam_set(path: Path, exam_set_id: str) -> bool:
-    store = load_exam_store(path)
-    exam_sets = store.get("examSets", [])
-    remaining_exam_sets: list[Any] = []
-    deleted = False
-
-    for exam_set in exam_sets:
-        if (
-            not deleted
-            and isinstance(exam_set, dict)
-            and exam_set.get("examSetId") == exam_set_id
-        ):
-            deleted = True
-            continue
-        remaining_exam_sets.append(exam_set)
-
-    if not deleted:
-        return False
-
-    store["examSets"] = remaining_exam_sets
-    write_json_atomic(path, store)
-    return True
+def append_active_exam_set(state: AppState, exam_set: dict[str, Any]) -> None:
+    upsert_project_exam_set(state.project_path, exam_set)
 
 
-def find_variant(path: Path, variant_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    store = load_exam_store(path)
-    for exam_set in store["examSets"]:
-        if not isinstance(exam_set, dict):
-            continue
-        for variant in exam_set.get("variants", []):
-            if isinstance(variant, dict) and variant.get("variantId") == variant_id:
-                return exam_set, variant
-    return None
+def delete_active_exam_set(state: AppState, exam_set_id: str) -> bool:
+    return delete_project_exam_set(state.project_path, exam_set_id)
 
 
-def find_exam_set(path: Path, exam_set_id: str) -> dict[str, Any] | None:
-    store = load_exam_store(path)
-    for exam_set in store["examSets"]:
-        if isinstance(exam_set, dict) and exam_set.get("examSetId") == exam_set_id:
-            return exam_set
-    return None
+def find_active_exam_set(state: AppState, exam_set_id: str) -> dict[str, Any] | None:
+    return find_project_exam_set(state.project_path, exam_set_id)
 
 
-def list_exam_sets(path: Path) -> list[dict[str, Any]]:
-    store = load_exam_store(path)
-    exam_sets = [exam_set for exam_set in store.get("examSets", []) if isinstance(exam_set, dict)]
-    exam_sets.sort(key=lambda item: str(item.get("generatedAt") or ""), reverse=True)
-    return exam_sets
+def find_active_variant(
+    state: AppState, variant_id: str
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    store = load_active_exam_store(state)
+    return build_variant_lookup(store).get(variant_id)
+
+
+def list_active_exam_sets(state: AppState) -> list[dict[str, Any]]:
+    return load_active_exam_store(state).get("examSets", [])
+
+
+def set_active_project(
+    state: AppState,
+    *,
+    project_path: Path,
+) -> None:
+    initialize_empty_project(project_path)
+    validation = validation_errors(state.validator, load_project_quiz(project_path))
+    if validation:
+        message = "; ".join(f"{item['path']}: {item['message']}" for item in validation)
+        raise ValueError(f"Project quiz document does not match the schema: {message}")
+    state.project_path = project_path
+    state.db_path = project_path
+    state.exam_store_path = project_path
 
 
 def dedupe_preserve_order(items: list[Any]) -> list[Any]:
@@ -565,6 +957,31 @@ def render_latex_choice_rows(choices: list[dict[str, Any]]) -> str:
     return " \\\\\n".join(rows)
 
 
+def question_image_asset_ids(question: dict[str, Any]) -> list[str]:
+    return [
+        asset_id.strip()
+        for asset_id in question.get("imageAssetIds", [])
+        if isinstance(asset_id, str) and asset_id.strip()
+    ]
+
+
+def render_question_images_latex(question: dict[str, Any]) -> str:
+    blocks: list[str] = []
+    for asset_id in question_image_asset_ids(question):
+        # The extension is resolved at asset-copy time; LaTeX can locate the copied image by basename.
+        safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", asset_id)
+        blocks.append(
+            "\n".join(
+                [
+                    r"\begin{center}",
+                    rf"\includegraphics[width=\linewidth,height=1.7in,keepaspectratio]{{asset-{safe_id}}}",
+                    r"\end{center}",
+                ]
+            )
+        )
+    return "\n".join(blocks)
+
+
 def render_student_template_choice_rows(choices: list[dict[str, Any]]) -> str:
     rows: list[str] = []
     for choice in choices:
@@ -608,11 +1025,13 @@ def render_student_question_blocks_latex(variant: dict[str, Any]) -> str:
         ]
         choice_rows = render_student_template_choice_rows(choices)
         prompt = render_rich_text_latex(question.get("question", ""), preserve_linebreaks=True).strip() or "—"
+        images = render_question_images_latex(question)
+        prompt_with_images = "\n\n".join(part for part in [prompt, images] if part)
         blocks.append(
             "\n".join(
                 [
                     r"\mcqitem",
-                    rf"  {{{prompt}}}",
+                    rf"  {{{prompt_with_images}}}",
                     rf"  {{{choice_rows}}}",
                 ]
             )
@@ -639,6 +1058,7 @@ def render_question_pool_blocks_latex(question_pool: list[dict[str, Any]]) -> st
             if isinstance(objective, dict) and str(objective.get("label") or objective.get("id") or "").strip()
         ) or "—"
         prompt = render_rich_text_latex(question.get("question", ""), preserve_linebreaks=True).strip() or "—"
+        images = render_question_images_latex(question)
         choices = [
             choice
             for choice in question.get("choices", [])
@@ -659,6 +1079,7 @@ def render_question_pool_blocks_latex(question_pool: list[dict[str, Any]]) -> st
                     rf"    {{\small\textbf{{{' \\textbullet{} '.join(meta_bits)}}}}}\par",
                     r"    \vspace{0.18em}",
                     f"    {prompt}\\par",
+                    (f"    {images}" if images else ""),
                     r"    \vspace{0.28em}",
                     r"    {\renewcommand{\arraystretch}{1.12}%",
                     r"    \begin{tabularx}{\linewidth}{@{}YY@{}}",
@@ -695,6 +1116,41 @@ def build_latex_font_assets() -> dict[str, bytes]:
                 f"{font_path}. Restore the file from tex_templates/fonts."
             )
         assets[asset_name] = font_path.read_bytes()
+    return assets
+
+
+def collect_question_image_asset_ids(questions: list[dict[str, Any]]) -> list[str]:
+    return dedupe_preserve_order(
+        [
+            asset_id
+            for question in questions
+            if isinstance(question, dict)
+            for asset_id in question_image_asset_ids(question)
+        ]
+    )
+
+
+def build_question_image_assets(
+    state: AppState | None,
+    questions: list[dict[str, Any]],
+) -> dict[str, bytes]:
+    if state is None:
+        return {}
+    assets: dict[str, bytes] = {}
+    for asset_id in collect_question_image_asset_ids(questions):
+        asset = get_project_asset(state.project_path, asset_id)
+        if asset is None:
+            continue
+        assets[latex_asset_name(asset_id, str(asset["mimeType"]))] = asset["data"]
+    return assets
+
+
+def build_question_pool_latex_assets(
+    state: AppState | None,
+    question_pool: list[dict[str, Any]],
+) -> dict[str, bytes]:
+    assets = build_latex_font_assets()
+    assets.update(build_question_image_assets(state, question_pool))
     return assets
 
 
@@ -846,9 +1302,9 @@ def question_locations(question: dict[str, Any]) -> list[dict[str, Any]]:
     raw_locations = question.get("locations")
     if isinstance(raw_locations, list):
         return [location for location in raw_locations if isinstance(location, dict)]
-    raw_legacy_locations = question.get("bookLocations")
-    if isinstance(raw_legacy_locations, list):
-        return [location for location in raw_legacy_locations if isinstance(location, dict)]
+    raw_book_locations = question.get("bookLocations")
+    if isinstance(raw_book_locations, list):
+        return [location for location in raw_book_locations if isinstance(location, dict)]
     return []
 
 
@@ -1216,6 +1672,7 @@ def analyze_grade_result(
                 {
                     "position": position,
                     "prompt": str(question.get("question") or ""),
+                    "imageAssetIds": question_image_asset_ids(question),
                     "allowedChoices": allowed,
                     "correctAnswers": correct,
                     "markedAnswers": marked if marked is not None else [],
@@ -1263,7 +1720,7 @@ def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
     if not input_path.is_dir() and not input_path.is_file():
         raise ValueError("Input path must be a PDF file or a directory containing PDFs")
 
-    store = load_exam_store(state.exam_store_path)
+    store = load_active_exam_store(state)
     variant_lookup = build_variant_lookup(store)
     raw_results = run_omr_grade(input_path)
     rows = [analyze_grade_result(result, variant_lookup) for result in raw_results]
@@ -1298,7 +1755,8 @@ def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
 
     return {
         "inputPath": str(input_path),
-        "examStorePath": str(state.exam_store_path),
+        "examStorePath": str(state.project_path),
+        "projectPath": str(state.project_path),
         "rows": rows,
         "summary": {
             "processedCount": len(rows),
@@ -1459,6 +1917,10 @@ def build_question_pool_entry(
         ],
         "shuffleChoices": bool(question["shuffleChoices"]),
         "locations": locations,
+        "imageAssetIds": [
+            asset_id for asset_id in question.get("imageAssetIds", [])
+            if isinstance(asset_id, str) and asset_id.strip()
+        ],
         "choices": [
             {"key": choice["key"], "text": choice["text"]}
             for choice in question["choices"]
@@ -1600,6 +2062,10 @@ def build_variant(
                 ],
                 "shuffleChoices": bool(question["shuffleChoices"]),
                 "locations": locations,
+                "imageAssetIds": [
+                    asset_id for asset_id in question.get("imageAssetIds", [])
+                    if isinstance(asset_id, str) and asset_id.strip()
+                ],
                 "displayChoices": display_choices,
                 "displayCorrectAnswers": display_correct_answers,
                 "sourceCorrectAnswers": list(question["correctAnswers"]),
@@ -1687,6 +2153,7 @@ def estimate_wrapped_line_count(text: str, chars_per_line: int) -> int:
 
 def estimate_question_print_units(question: dict[str, Any]) -> int:
     units = 4 + estimate_wrapped_line_count(question.get("question", ""), 92)
+    units += 8 * len(question_image_asset_ids(question))
     for choice in question.get("displayChoices", []):
         units += 1 + estimate_wrapped_line_count(choice.get("text", ""), 84)
     return units + 1
@@ -1814,7 +2281,8 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
         "quiz": {
             "title": quiz.get("title", ""),
             "description": quiz.get("description", ""),
-            "dbPath": str(state.db_path),
+            "dbPath": str(state.project_path),
+            "projectPath": str(state.project_path),
         },
         "printSettings": {
             "institutionName": request["institutionName"],
@@ -1856,7 +2324,7 @@ def get_question_pool_for_export(state: AppState, exam_set: dict[str, Any]) -> l
     if isinstance(question_pool, list) and question_pool:
         return question_pool
 
-    quiz = load_json(state.db_path)
+    quiz = load_active_quiz(state)
     question_by_id, _, _ = build_question_index(quiz)
     objective_labels = {
         objective["id"]: objective["label"]
@@ -1937,8 +2405,14 @@ def build_student_latex_document(exam_set: dict[str, Any], variant: dict[str, An
     return apply_latex_template(LATEX_STUDENT_TEMPLATE, replacements)
 
 
-def build_student_latex_assets(exam_set: dict[str, Any], variant: dict[str, Any]) -> dict[str, bytes]:
+def build_student_latex_assets(
+    exam_set: dict[str, Any],
+    variant: dict[str, Any],
+    state: AppState | None = None,
+) -> dict[str, bytes]:
     assets = build_latex_font_assets()
+    questions = [question for question in variant.get("questions", []) if isinstance(question, dict)]
+    assets.update(build_question_image_assets(state, questions))
     exam_set_id = str(exam_set.get("examSetId") or "").strip()
     variant_id = str(variant.get("variantId") or "").strip()
     if not exam_set_id or not variant_id:
@@ -3137,6 +3611,7 @@ def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
         question_pool_pdf = render_latex_to_pdf(
             build_question_pool_latex_document(exam_set, question_pool),
             job_name="question-pool",
+            assets=build_question_pool_latex_assets(state, question_pool),
         )
         archive.writestr(
             f"{base_folder}/{question_pool_name}",
@@ -3150,7 +3625,7 @@ def build_printable_zip(state: AppState, exam_set: dict[str, Any]) -> bytes:
             student_printable_pdf = render_latex_to_pdf(
                 build_student_latex_document(exam_set, variant),
                 job_name=f"student-variant-{int(variant.get('printableOrdinal') or 1):02d}",
-                assets=build_student_latex_assets(exam_set, variant),
+                assets=build_student_latex_assets(exam_set, variant, state),
             )
             omr_pdf = build_omr_sheet_pdf_bytes(exam_set, variant)
             variant_pdf = append_pdf_documents(student_printable_pdf, omr_pdf)
@@ -3168,14 +3643,26 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/api/project":
+                self.handle_get_project()
+                return
+            if parsed.path == "/api/file-browser":
+                self.handle_file_browser(parsed.query)
+                return
             if parsed.path == "/api/session-paths":
                 self.handle_get_session_paths()
+                return
+            if parsed.path == "/api/generator-draft":
+                self.handle_get_generator_draft()
                 return
             if parsed.path == "/api/quiz":
                 self.handle_get_quiz()
                 return
             if parsed.path == "/api/exams":
                 self.handle_list_exam_sets()
+                return
+            if parsed.path.startswith("/api/assets/"):
+                self.handle_get_asset(parsed.path)
                 return
             if parsed.path.startswith("/api/exams/set/"):
                 self.handle_get_exam_set(parsed.path)
@@ -3193,15 +3680,27 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_PUT(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            if parsed.path != "/api/quiz":
-                self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
+            if parsed.path == "/api/quiz":
+                self.handle_put_quiz()
                 return
-            self.handle_put_quiz()
+            if parsed.path == "/api/generator-draft":
+                self.handle_put_generator_draft()
+                return
+            self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/api/project/open":
+                self.handle_open_project()
+                return
             if parsed.path == "/api/session-paths":
                 self.handle_update_session_paths()
+                return
+            if parsed.path == "/api/assets":
+                self.handle_post_asset()
+                return
+            if parsed.path == "/api/quiz/import-json":
+                self.handle_import_quiz_json()
                 return
             if parsed.path == "/api/quiz":
                 self.handle_put_quiz()
@@ -3219,6 +3718,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_DELETE(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/api/generator-draft":
+                self.handle_delete_generator_draft()
+                return
             if parsed.path.startswith("/api/exams/set/"):
                 self.handle_delete_exam_set(parsed.path)
                 return
@@ -3243,29 +3745,73 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             return payload, []
 
+        def session_payload(self, *, ok: bool = True) -> dict[str, Any]:
+            return {
+                "ok": ok,
+                "projectPath": str(state.project_path),
+                "dbPath": str(state.project_path),
+                "examStorePath": str(state.project_path),
+                "defaultProjectPath": display_default_project_path(),
+            }
+
         def handle_get_quiz(self) -> None:
-            quiz = load_json(state.db_path)
+            quiz = load_active_quiz(state)
             self.send_json(
                 {
+                    **self.session_payload(),
                     "quiz": quiz,
-                    "dbPath": str(state.db_path),
-                    "schemaPath": str(state.schema_path),
-                    "examStorePath": str(state.exam_store_path),
-                    "defaultDbPath": display_default_db_path(),
-                    "defaultExamStorePath": display_default_exam_store_path(),
                 }
             )
 
-        def handle_get_session_paths(self) -> None:
+        def handle_get_project(self) -> None:
+            self.send_json(self.session_payload())
+
+        def handle_file_browser(self, query: str) -> None:
+            params = parse_qs(query)
+            purpose = (params.get("purpose", ["project"])[0] or "project").strip()
+            if purpose not in {"project", "quiz-json", "pdf-or-dir", "directory"}:
+                purpose = "project"
+            raw_path = params.get("path", [""])[0] or ""
+            fallback_path = state.project_path.parent if state.project_path else Path.cwd()
             self.send_json(
-                {
-                    "dbPath": str(state.db_path),
-                    "schemaPath": str(state.schema_path),
-                    "examStorePath": str(state.exam_store_path),
-                    "defaultDbPath": display_default_db_path(),
-                    "defaultExamStorePath": display_default_exam_store_path(),
-                }
+                build_file_browser_payload(
+                    raw_path=raw_path,
+                    purpose=purpose,
+                    fallback_path=fallback_path,
+                )
             )
+
+        def handle_get_session_paths(self) -> None:
+            self.send_json(self.session_payload())
+
+        def handle_open_project(self) -> None:
+            payload, errors = self.read_json_body()
+            if errors:
+                self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            raw_project_path = payload.get("projectPath")
+            request_errors: list[dict[str, str]] = []
+            if not isinstance(raw_project_path, str) or not raw_project_path.strip():
+                request_errors.append({"path": "projectPath", "message": "Project DB path is required"})
+            if request_errors:
+                self.send_json({"ok": False, "errors": request_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            project_path = Path(raw_project_path).expanduser().resolve()
+            try:
+                set_active_project(
+                    state,
+                    project_path=project_path,
+                )
+            except ValueError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<project>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            self.send_json(self.session_payload())
 
         def handle_update_session_paths(self) -> None:
             payload, errors = self.read_json_body()
@@ -3273,21 +3819,20 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
                 return
 
-            raw_db_path = payload.get("dbPath")
-            raw_exam_store_path = payload.get("examStorePath")
+            raw_project_path = payload.get("projectPath")
             request_errors: list[dict[str, str]] = []
-            if not isinstance(raw_db_path, str) or not raw_db_path.strip():
-                request_errors.append({"path": "dbPath", "message": "Quiz DB path is required"})
-            if not isinstance(raw_exam_store_path, str) or not raw_exam_store_path.strip():
-                request_errors.append({"path": "examStorePath", "message": "Exam DB path is required"})
+            if not isinstance(raw_project_path, str) or not raw_project_path.strip():
+                request_errors.append({"path": "projectPath", "message": "Project DB path must not be empty"})
             if request_errors:
                 self.send_json({"ok": False, "errors": request_errors}, status=HTTPStatus.BAD_REQUEST)
                 return
 
-            db_path = Path(raw_db_path).expanduser().resolve()
-            exam_store_path = Path(raw_exam_store_path).expanduser().resolve()
+            project_path = Path(raw_project_path).expanduser().resolve()
             try:
-                set_active_paths(state, db_path=db_path, exam_store_path=exam_store_path)
+                set_active_project(
+                    state,
+                    project_path=project_path,
+                )
             except ValueError as error:
                 self.send_json(
                     {"ok": False, "errors": [{"path": "<paths>", "message": str(error)}]},
@@ -3295,20 +3840,109 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
-            self.send_json(
-                {
-                    "ok": True,
-                    "dbPath": str(state.db_path),
-                    "schemaPath": str(state.schema_path),
-                    "examStorePath": str(state.exam_store_path),
-                    "defaultDbPath": display_default_db_path(),
-                    "defaultExamStorePath": display_default_exam_store_path(),
-                }
+            self.send_json(self.session_payload())
+
+        def handle_get_generator_draft(self) -> None:
+            draft = load_project_generator_draft(state.project_path)
+            self.send_json({"draft": draft, "projectPath": str(state.project_path)})
+
+        def handle_put_generator_draft(self) -> None:
+            payload, errors = self.read_json_body()
+            if errors:
+                self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+            write_project_generator_draft(state.project_path, payload)
+            self.send_json({"ok": True, "projectPath": str(state.project_path)})
+
+        def handle_delete_generator_draft(self) -> None:
+            delete_project_generator_draft(state.project_path)
+            self.send_json({"ok": True, "projectPath": str(state.project_path)})
+
+        def handle_import_quiz_json(self) -> None:
+            payload, errors = self.read_json_body()
+            if errors:
+                self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            raw_path = payload.get("path")
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "path", "message": "Quiz JSON path is required"}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            quiz_path = Path(raw_path).expanduser().resolve()
+            try:
+                quiz = import_quiz_json_into_project(
+                    project_path=state.project_path,
+                    quiz_path=quiz_path,
+                    validator=state.validator,
+                )
+                delete_project_generator_draft(state.project_path)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<import>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            self.send_json({"ok": True, "quiz": quiz, **self.session_payload()})
+
+        def handle_post_asset(self) -> None:
+            payload, errors = self.read_json_body()
+            if errors:
+                self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            filename = payload.get("filename")
+            mime_type = payload.get("mimeType")
+            data_base64 = payload.get("dataBase64")
+            request_errors: list[dict[str, str]] = []
+            if not isinstance(filename, str) or not filename.strip():
+                request_errors.append({"path": "filename", "message": "filename is required"})
+            if not isinstance(mime_type, str) or mime_type.strip().lower() not in ALLOWED_IMAGE_MIME_TYPES:
+                request_errors.append({"path": "mimeType", "message": "Only PNG and JPEG images are supported"})
+            if not isinstance(data_base64, str) or not data_base64.strip():
+                request_errors.append({"path": "dataBase64", "message": "Image data is required"})
+            if request_errors:
+                self.send_json({"ok": False, "errors": request_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            try:
+                image_bytes = base64.b64decode(data_base64, validate=True)
+                asset = store_project_asset(
+                    state.project_path,
+                    filename=filename,
+                    mime_type=mime_type,
+                    data=image_bytes,
+                )
+            except (ValueError, binascii.Error) as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<asset>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self.send_json({"ok": True, "asset": asset})
+
+        def handle_get_asset(self, path: str) -> None:
+            asset_id = unquote(path.removeprefix("/api/assets/")).strip()
+            if not asset_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Asset not found")
+                return
+            asset = get_project_asset(state.project_path, asset_id)
+            if asset is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "Asset not found")
+                return
+            self.send_blob(
+                asset["data"],
+                content_type=str(asset["mimeType"]),
+                filename=str(asset["filename"]),
             )
 
         def handle_list_exam_sets(self) -> None:
             try:
-                summaries = [build_exam_set_summary(item) for item in list_exam_sets(state.exam_store_path)]
+                summaries = [build_exam_set_summary(item) for item in list_active_exam_sets(state)]
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<store>", "message": str(error)}]},
@@ -3318,7 +3952,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             self.send_json(
                 {
-                    "examStorePath": str(state.exam_store_path),
+                    "examStorePath": str(state.project_path),
+                    "projectPath": str(state.project_path),
                     "examSets": summaries,
                 }
             )
@@ -3330,7 +3965,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             try:
-                exam_set = find_exam_set(state.exam_store_path, exam_set_id)
+                exam_set = find_active_exam_set(state, exam_set_id)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<store>", "message": str(error)}]},
@@ -3351,7 +3986,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             self.send_json(
                 {
-                    "examStorePath": str(state.exam_store_path),
+                    "examStorePath": str(state.project_path),
+                    "projectPath": str(state.project_path),
                     "summary": build_exam_set_summary(exam_set),
                     "examSet": {
                         "examSetId": exam_set["examSetId"],
@@ -3372,7 +4008,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             try:
-                deleted = delete_exam_set(state.exam_store_path, exam_set_id)
+                deleted = delete_active_exam_set(state, exam_set_id)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<store>", "message": str(error)}]},
@@ -3393,7 +4029,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             try:
-                record = find_variant(state.exam_store_path, variant_id)
+                record = find_active_variant(state, variant_id)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<store>", "message": str(error)}]},
@@ -3410,7 +4046,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             annotate_variant_print_layouts([variant])
             self.send_json(
                 {
-                    "examStorePath": str(state.exam_store_path),
+                    "examStorePath": str(state.project_path),
+                    "projectPath": str(state.project_path),
                     "examSetId": exam_set["examSetId"],
                     "generatedAt": exam_set["generatedAt"],
                     "quiz": exam_set["quiz"],
@@ -3427,7 +4064,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             try:
-                record = find_variant(state.exam_store_path, variant_id)
+                record = find_active_variant(state, variant_id)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<store>", "message": str(error)}]},
@@ -3452,7 +4089,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             try:
-                exam_set = find_exam_set(state.exam_store_path, exam_set_id)
+                exam_set = find_active_exam_set(state, exam_set_id)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<store>", "message": str(error)}]},
@@ -3490,7 +4127,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 self.send_json({"ok": False, "errors": validation}, status=HTTPStatus.BAD_REQUEST)
                 return
 
-            write_json_atomic(state.db_path, payload)
+            write_active_quiz(state, payload)
             self.send_json({"ok": True})
 
         def handle_generate_exams(self) -> None:
@@ -3499,7 +4136,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 self.send_json({"errors": body_errors}, status=HTTPStatus.BAD_REQUEST)
                 return
 
-            quiz = load_json(state.db_path)
+            quiz = load_active_quiz(state)
             quiz_errors = validation_errors(state.validator, quiz)
             if quiz_errors:
                 self.send_json(
@@ -3507,7 +4144,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                         "errors": [
                             {
                                 "path": "<quiz>",
-                                "message": "The quiz database on disk is invalid. Fix it before generating exams.",
+                                "message": "The quiz document in the project DB is invalid. Fix it before generating exams.",
                             },
                             *quiz_errors,
                         ]
@@ -3531,7 +4168,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             try:
-                append_exam_set(state.exam_store_path, exam_run)
+                append_active_exam_set(state, exam_run)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<store>", "message": str(error)}]},
@@ -3545,7 +4182,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
-            exam_run["examStorePath"] = str(state.exam_store_path)
+            exam_run["examStorePath"] = str(state.project_path)
+            exam_run["projectPath"] = str(state.project_path)
             self.send_json(exam_run)
 
         def handle_grade_exams(self) -> None:
@@ -3667,6 +4305,22 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(payload)
 
+        def send_blob(
+            self,
+            payload: bytes,
+            *,
+            content_type: str,
+            filename: str | None = None,
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            if filename:
+                self.send_header("Content-Disposition", f'inline; filename="{filename}"')
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def send_text(
             self,
             payload: str,
@@ -3687,21 +4341,10 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Quiz pool browser editor")
     parser.add_argument(
-        "--db",
+        "--project",
         type=Path,
-        default=DEFAULT_DB,
-        help="Path to the quiz JSON file to edit",
-    )
-    parser.add_argument(
-        "--schema",
-        type=Path,
-        default=DEFAULT_SCHEMA,
-        help="Path to the JSON schema used for validation",
-    )
-    parser.add_argument(
-        "--exam-store",
-        type=Path,
-        help="Path to the generated exam store JSON file",
+        default=default_project_path_for(DEFAULT_DB),
+        help="Path to the unified Quiz Pool project database (.quizpool)",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
     parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
@@ -3710,43 +4353,30 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    db_path = args.db.resolve()
-    schema_path = args.schema.resolve()
-    exam_store_path = (
-        args.exam_store.resolve()
-        if args.exam_store is not None
-        else default_exam_store_path_for(db_path)
-    )
+    project_path = args.project.resolve()
 
-    if not schema_path.is_file():
-        raise SystemExit(f"Schema file not found: {schema_path}")
+    if not INTERNAL_SCHEMA_PATH.is_file():
+        raise SystemExit(f"Internal schema file not found: {INTERNAL_SCHEMA_PATH}")
     if not WEB_ROOT.is_dir():
         raise SystemExit(f"Web assets not found: {WEB_ROOT}")
 
-    schema = load_json(schema_path)
-    validator = Draft202012Validator(schema)
+    validator = Draft202012Validator(load_internal_schema())
     try:
-        validate_quiz_file(db_path, validator)
+        initialize_empty_project(project_path)
     except ValueError as error:
         raise SystemExit(str(error)) from error
 
-    try:
-        validate_exam_store_file(exam_store_path)
-    except ValueError as error:
-        raise SystemExit(f"Exam store is invalid: {error}") from error
-
     app_state = AppState(
-        db_path=db_path,
-        schema_path=schema_path,
-        exam_store_path=exam_store_path,
+        db_path=project_path,
+        exam_store_path=project_path,
+        project_path=project_path,
         validator=validator,
     )
     handler = build_handler(app_state)
     server = ThreadingHTTPServer((args.host, args.port), handler)
 
     print(f"Quiz editor running at http://{args.host}:{args.port}")
-    print(f"Editing database: {db_path}")
-    print(f"Exam store: {exam_store_path}")
+    print(f"Project DB: {project_path}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

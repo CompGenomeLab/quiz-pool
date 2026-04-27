@@ -1,27 +1,23 @@
+import { browseFile } from "./file-browser.js";
+
 const state = {
-  currentDbPath: "",
-  currentExamStorePath: "",
-  defaultDbPath: "",
-  defaultExamStorePath: "",
-  schemaPath: "",
+  currentProjectPath: "",
+  defaultProjectPath: "",
+  selectedProjectPath: "",
   statusIsError: false,
-  statusMessage: "Loading current paths...",
+  statusMessage: "Loading current project...",
   validationErrors: [],
 };
 
 const elements = {
-  applyPaths: document.querySelector("#welcome-apply-paths"),
-  currentDbPath: document.querySelector("#welcome-current-db-path"),
-  currentExamStorePath: document.querySelector("#welcome-current-exam-store-path"),
-  dbPath: document.querySelector("#welcome-db-path"),
-  defaultDbPath: document.querySelector("#welcome-default-db-path"),
-  defaultExamStorePath: document.querySelector("#welcome-default-exam-store-path"),
+  applyProject: document.querySelector("#welcome-apply-project"),
+  browseProject: document.querySelector("#welcome-browse-project"),
+  currentProjectPath: document.querySelector("#welcome-current-project-path"),
+  defaultProjectPath: document.querySelector("#welcome-default-project-path"),
   errorList: document.querySelector("#welcome-error-list"),
   errorPanel: document.querySelector("#welcome-errors"),
-  examStorePath: document.querySelector("#welcome-exam-store-path"),
-  schemaPath: document.querySelector("#welcome-schema-path"),
+  selectedProjectPath: document.querySelector("#welcome-selected-project-path"),
   status: document.querySelector("#welcome-status"),
-  useDefaults: document.querySelector("#welcome-use-defaults"),
 };
 
 function setStatus(message, isError = false) {
@@ -49,80 +45,78 @@ function renderErrors() {
 }
 
 function render() {
-  elements.dbPath.value = state.currentDbPath;
-  elements.examStorePath.value = state.currentExamStorePath;
-  elements.currentDbPath.textContent = state.currentDbPath;
-  elements.currentExamStorePath.textContent = state.currentExamStorePath;
-  elements.defaultDbPath.textContent = state.defaultDbPath;
-  elements.defaultExamStorePath.textContent = state.defaultExamStorePath;
-  elements.schemaPath.textContent = state.schemaPath;
+  elements.currentProjectPath.textContent = state.currentProjectPath;
+  elements.defaultProjectPath.textContent = state.defaultProjectPath;
+  elements.selectedProjectPath.textContent = state.selectedProjectPath || state.currentProjectPath;
   renderErrors();
 }
 
-async function loadSessionPaths() {
-  setStatus("Loading current paths...");
-  const response = await fetch("/api/session-paths");
+async function loadProject() {
+  setStatus("Loading current project...");
+  const response = await fetch("/api/project");
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(payload.errors?.[0]?.message ?? `Could not load paths (${response.status})`);
+    throw new Error(payload.errors?.[0]?.message ?? `Could not load project (${response.status})`);
   }
 
-  state.currentDbPath = payload.dbPath;
-  state.currentExamStorePath = payload.examStorePath;
-  state.defaultDbPath = payload.defaultDbPath;
-  state.defaultExamStorePath = payload.defaultExamStorePath;
-  state.schemaPath = payload.schemaPath;
+  state.currentProjectPath = payload.projectPath;
+  state.selectedProjectPath = payload.projectPath;
+  state.defaultProjectPath = payload.defaultProjectPath ?? "";
   state.validationErrors = [];
   render();
   setStatus("Ready.");
 }
 
-async function applyPaths() {
-  const dbPath = elements.dbPath.value.trim();
-  const examStorePath = elements.examStorePath.value.trim();
+async function openProject() {
+  const projectPath = state.selectedProjectPath || state.currentProjectPath;
   state.validationErrors = [];
   renderErrors();
-  setStatus("Applying selected paths...");
+  setStatus("Opening selected project...");
 
-  const response = await fetch("/api/session-paths", {
+  const response = await fetch("/api/project/open", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ dbPath, examStorePath }),
+    body: JSON.stringify({ projectPath }),
   });
   const payload = await response.json();
   if (!response.ok) {
-    state.validationErrors = payload.errors ?? [{ path: "<paths>", message: "Could not apply paths" }];
+    state.validationErrors = payload.errors ?? [{ path: "<project>", message: "Could not open project" }];
     renderErrors();
-    setStatus("Path update failed. Review the messages.", true);
+    setStatus("Project open failed. Review the messages.", true);
     return;
   }
 
-  state.currentDbPath = payload.dbPath;
-  state.currentExamStorePath = payload.examStorePath;
-  state.defaultDbPath = payload.defaultDbPath;
-  state.defaultExamStorePath = payload.defaultExamStorePath;
-  state.schemaPath = payload.schemaPath;
-  state.validationErrors = [];
+  state.currentProjectPath = payload.projectPath;
+  state.selectedProjectPath = payload.projectPath;
+  state.defaultProjectPath = payload.defaultProjectPath ?? state.defaultProjectPath;
   render();
-  setStatus("Active paths updated.");
+  setStatus("Active project updated.");
 }
 
 function wireEvents() {
-  elements.useDefaults.addEventListener("click", () => {
-    elements.dbPath.value = state.defaultDbPath;
-    elements.examStorePath.value = state.defaultExamStorePath;
-    setStatus("Default paths loaded into the form.");
+  elements.browseProject.addEventListener("click", async () => {
+    const selectedPath = await browseFile({
+      title: "Open Project DB",
+      purpose: "project",
+      startPath: state.selectedProjectPath || state.currentProjectPath,
+    });
+    if (!selectedPath) {
+      return;
+    }
+    state.selectedProjectPath = selectedPath;
+    render();
+    setStatus("Project selected. Open it to switch the session.");
   });
 
-  elements.applyPaths.addEventListener("click", async () => {
-    await applyPaths();
+  elements.applyProject.addEventListener("click", async () => {
+    await openProject();
   });
 }
 
 wireEvents();
-loadSessionPaths().catch((error) => {
+loadProject().catch((error) => {
   console.error(error);
   state.validationErrors = [{ path: "<welcome>", message: error.message }];
   renderErrors();

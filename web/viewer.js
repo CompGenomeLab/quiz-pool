@@ -65,6 +65,34 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function assetUrl(assetId) {
+  return `/api/assets/${encodeURIComponent(assetId)}`;
+}
+
+function questionImageAssetIds(question = {}) {
+  return Array.isArray(question.imageAssetIds)
+    ? question.imageAssetIds.filter((assetId) => typeof assetId === "string" && assetId.trim() !== "")
+    : [];
+}
+
+function createQuestionImagePreviews(question) {
+  const imageAssetIds = questionImageAssetIds(question);
+  if (imageAssetIds.length === 0) {
+    return null;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "question-image-list";
+  imageAssetIds.forEach((assetId, index) => {
+    const image = document.createElement("img");
+    image.className = "question-image-preview";
+    image.src = assetUrl(assetId);
+    image.alt = `Question image ${index + 1}`;
+    image.loading = "lazy";
+    wrap.append(image);
+  });
+  return wrap;
+}
+
 function renderErrors() {
   if (state.validationErrors.length === 0) {
     elements.errorPanel.classList.add("hidden");
@@ -138,6 +166,10 @@ function renderQuestionPool(questionPool) {
     const questionCell = document.createElement("td");
     questionCell.className = "cell-copy";
     renderRichTextIntoElement(questionCell, question.question || "—");
+    const poolImages = createQuestionImagePreviews(question);
+    if (poolImages) {
+      questionCell.append(poolImages);
+    }
 
     const pointsCell = document.createElement("td");
     pointsCell.textContent = String(question.points ?? 1);
@@ -205,6 +237,7 @@ function renderVariants(variants, printSettings) {
       const prompt = document.createElement("p");
       prompt.className = "question-preview__title";
       renderRichTextIntoElement(prompt, question.question);
+      const imagePreviews = createQuestionImagePreviews(question);
 
       const choices = document.createElement("ul");
       choices.className = "choice-list";
@@ -227,7 +260,11 @@ function renderVariants(variants, printSettings) {
       correct.className = "helper-copy";
       correct.textContent = `Displayed correct: ${question.displayCorrectAnswers.join(", ") || "—"}`;
 
-      section.append(questionHead, prompt, choices, correct);
+      section.append(questionHead, prompt);
+      if (imagePreviews) {
+        section.append(imagePreviews);
+      }
+      section.append(choices, correct);
       questionList.append(section);
     }
 

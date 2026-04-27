@@ -13,8 +13,8 @@
           <p class="eyebrow">Quiz Pool</p>
           <h1>Welcome</h1>
           <p class="sidebar__copy">
-            Choose the active quiz database JSON and exam database JSON for this server session, then continue into
-            the editor, generator, viewer, or grading tools.
+            Choose one Quiz Pool project database for this server session, then continue into the editor,
+            generator, viewer, or grading tools.
           </p>
         </div>
         <nav class="page-links">
@@ -30,40 +30,34 @@
         <aside class="panel generator-controls">
           <div>
             <p class="eyebrow">Session</p>
-            <h2>Active Paths</h2>
+            <h2>Active Project</h2>
             <p class="helper-copy">
-              These paths apply to the running server session. Defaults are shown below for quick reset.
+              The project DB stores the quiz, generated exams, generator draft, and question images.
             </p>
           </div>
 
           <div class="status-card">
-            <p class="status-card__label">Schema</p>
-            <p id="welcome-schema-path" class="status-card__value"></p>
             <p class="status-card__label">Status</p>
             <p id="welcome-status" class="status-card__hint">Loading current paths...</p>
           </div>
 
           <div class="stack">
-            <label class="field field--full">
-              <span>Quiz DB JSON</span>
-              <input id="welcome-db-path" type="text" placeholder="/absolute/path/to/quiz.json" />
-            </label>
-            <label class="field field--full">
-              <span>Exam DB JSON</span>
-              <input id="welcome-exam-store-path" type="text" placeholder="/absolute/path/to/generated_exams.json" />
-            </label>
+            <div class="metric">
+              <span class="metric__label">Selected Project DB</span>
+              <span id="welcome-selected-project-path" class="metric__value"></span>
+            </div>
           </div>
 
           <div class="sidebar__actions">
-            <button id="welcome-use-defaults" class="button button--ghost" type="button">Use Defaults</button>
-            <button id="welcome-apply-paths" class="button button--primary" type="button">Apply Paths</button>
+            <button id="welcome-browse-project" class="button button--ghost" type="button">Browse Projects</button>
+            <button id="welcome-apply-project" class="button button--primary" type="button">Open Project</button>
           </div>
         </aside>
 
         <main class="generator-main">
           <section id="welcome-errors" class="panel panel--error hidden">
             <div class="panel__subhead">
-              <h3>Path Errors</h3>
+              <h3>Project Errors</h3>
               <p>Fix these issues before continuing.</p>
             </div>
             <ul id="welcome-error-list" class="error-list"></ul>
@@ -78,20 +72,12 @@
             </div>
             <div class="result-summary">
               <div class="metric">
-                <span class="metric__label">Default Quiz DB</span>
-                <span id="welcome-default-db-path" class="metric__value"></span>
+                <span class="metric__label">Default Project DB</span>
+                <span id="welcome-default-project-path" class="metric__value"></span>
               </div>
               <div class="metric">
-                <span class="metric__label">Default Exam DB</span>
-                <span id="welcome-default-exam-store-path" class="metric__value"></span>
-              </div>
-              <div class="metric">
-                <span class="metric__label">Current Quiz DB</span>
-                <span id="welcome-current-db-path" class="metric__value"></span>
-              </div>
-              <div class="metric">
-                <span class="metric__label">Current Exam DB</span>
-                <span id="welcome-current-exam-store-path" class="metric__value"></span>
+                <span class="metric__label">Current Project DB</span>
+                <span id="welcome-current-project-path" class="metric__value"></span>
               </div>
             </div>
           </section>
@@ -104,13 +90,13 @@
               </div>
             </div>
             <p class="helper-copy">
-              These links use the currently active paths. Apply changes first if you edited either path above.
+              These links use the currently active project. Open a different project first if needed.
             </p>
             <div class="tool-grid">
               <a class="tool-card tool-card--editor" href="/index.html">
                 <span class="tool-card__kicker">Authoring</span>
                 <strong class="tool-card__title">Editor</strong>
-                <span class="tool-card__text">Edit the quiz JSON directly, manage question metadata, and validate against the schema.</span>
+                <span class="tool-card__text">Edit the quiz JSON directly, manage question metadata, and validate against the built-in rules.</span>
                 <span class="tool-card__action">Open Editor</span>
               </a>
               <a class="tool-card tool-card--generator" href="/generator.html">

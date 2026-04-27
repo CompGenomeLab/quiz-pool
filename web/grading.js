@@ -1,3 +1,4 @@
+import { browseFile } from "./file-browser.js";
 import { renderRichTextHtml } from "./rich-text.js";
 
 const state = {
@@ -22,6 +23,8 @@ const elements = {
   annotateModal: document.querySelector("#annotate-modal"),
   annotateModalBackdrop: document.querySelector("#annotate-modal-backdrop"),
   annotateOutputPath: document.querySelector("#annotate-output-path"),
+  browseAnnotateOutput: document.querySelector("#browse-annotate-output"),
+  browseGradingInput: document.querySelector("#browse-grading-input"),
   cancelAnnotateModal: document.querySelector("#cancel-annotate-modal"),
   confirmAnnotateModal: document.querySelector("#confirm-annotate-modal"),
   dbPath: document.querySelector("#db-path"),
@@ -86,8 +89,7 @@ function openAnnotateModal() {
   state.annotateModalOpen = true;
   renderAnnotateModal();
   window.setTimeout(() => {
-    elements.annotateOutputPath.focus();
-    elements.annotateOutputPath.select();
+    elements.browseAnnotateOutput.focus();
   }, 0);
 }
 
@@ -103,6 +105,26 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function assetUrl(assetId) {
+  return `/api/assets/${encodeURIComponent(assetId)}`;
+}
+
+function renderQuestionImageHtml(question = {}) {
+  const imageAssetIds = Array.isArray(question.imageAssetIds)
+    ? question.imageAssetIds.filter((assetId) => typeof assetId === "string" && assetId.trim() !== "")
+    : [];
+  if (imageAssetIds.length === 0) {
+    return "";
+  }
+  return `
+    <div class="question-image-list">
+      ${imageAssetIds.map((assetId, index) => `
+        <img class="question-image-preview" src="${assetUrl(assetId)}" alt="Question image ${index + 1}" loading="lazy" />
+      `).join("")}
+    </div>
+  `;
 }
 
 function renderErrors() {
@@ -316,7 +338,7 @@ function renderSelectedDetail(rows) {
     ? selectedRow.questionDetails.map((question) => `
       <tr>
         <td>${question.position}</td>
-        <td class="cell-copy">${renderRichTextHtml(question.prompt || "—")}</td>
+        <td class="cell-copy">${renderRichTextHtml(question.prompt || "—")}${renderQuestionImageHtml(question)}</td>
         <td>${escapeHtml(question.allowedChoices.join(", ") || "—")}</td>
         <td>${escapeHtml(question.markedAnswers.join(", ") || "—")}</td>
         <td>${escapeHtml(question.correctAnswers.join(", ") || "—")}</td>
@@ -483,6 +505,29 @@ async function annotateGradedPdfs() {
 }
 
 function wireEvents() {
+  elements.browseGradingInput.addEventListener("click", async () => {
+    const selectedPath = await browseFile({
+      title: "Choose PDF Or Folder",
+      purpose: "pdf-or-dir",
+      startPath: elements.gradingInputPath.value.trim(),
+    });
+    if (!selectedPath) {
+      return;
+    }
+    elements.gradingInputPath.value = selectedPath;
+    setStatus("Scan source selected.");
+  });
+  elements.browseAnnotateOutput.addEventListener("click", async () => {
+    const selectedPath = await browseFile({
+      title: "Choose Output Folder",
+      purpose: "directory",
+      startPath: elements.annotateOutputPath.value.trim(),
+    });
+    if (!selectedPath) {
+      return;
+    }
+    elements.annotateOutputPath.value = selectedPath;
+  });
   elements.annotateGradedPdfs.addEventListener("click", () => {
     openAnnotateModal();
   });
