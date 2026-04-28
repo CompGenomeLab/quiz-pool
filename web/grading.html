@@ -13,20 +13,15 @@
         <div class="panel__head">
           <div>
             <p class="eyebrow">OMR Annotate</p>
-            <h2 id="annotate-modal-title">Choose Output Folder</h2>
+            <h2 id="annotate-modal-title">Download Annotated PDFs</h2>
           </div>
         </div>
         <p class="question-detail-sheet__copy">
-          Annotated PDFs will be written into this folder with row-index and student-ID based filenames.
+          Annotated PDFs will be packaged with row-index and student-ID based filenames.
         </p>
-        <label class="field field--full">
-          <span>Output Folder Path</span>
-          <input id="annotate-output-path" type="text" readonly />
-        </label>
         <div class="panel__actions">
-          <button id="browse-annotate-output" class="button button--ghost" type="button">Browse Folders</button>
           <button id="cancel-annotate-modal" class="button button--ghost" type="button">Cancel</button>
-          <button id="confirm-annotate-modal" class="button button--primary" type="button">Run OMR Annotate</button>
+          <button id="confirm-annotate-modal" class="button button--primary" type="button">Download Annotated PDFs</button>
         </div>
       </section>
     </div>
@@ -43,7 +38,7 @@
           <p class="eyebrow">Quiz Pool</p>
           <h1>Grading</h1>
           <p class="sidebar__copy">
-            Run <code>omr-grade</code> against a local PDF or directory, then validate each graded result against the
+            Run <code>omr-grade</code> against uploaded PDFs, then validate each graded result against the
             stored exam variants.
           </p>
         </div>
@@ -62,7 +57,7 @@
             <p class="eyebrow">Inputs</p>
             <h2>Scan Source</h2>
             <p class="helper-copy">
-              Choose a local PDF or a directory containing filled OMR sheet PDFs on this machine.
+              Choose one or more filled OMR sheet PDFs from this browser.
             </p>
           </div>
 
@@ -76,15 +71,17 @@
 
           <div class="stack">
             <label class="field field--full">
-              <span>PDF Or Directory</span>
+              <span>Selected PDFs</span>
               <input id="grading-input-path" type="text" readonly />
             </label>
           </div>
 
           <div class="sidebar__actions">
-            <button id="browse-grading-file" class="button button--ghost" type="button">Choose PDF</button>
+            <button id="browse-grading-file" class="button button--ghost" type="button">Choose PDFs</button>
             <button id="browse-grading-folder" class="button button--ghost" type="button">Choose Folder</button>
             <button id="run-grading" class="button button--primary" type="button">Run Grading</button>
+            <input id="grading-pdf-upload" class="visually-hidden-file" type="file" accept=".pdf,application/pdf" multiple />
+            <input id="grading-folder-upload" class="visually-hidden-file" type="file" accept=".pdf,application/pdf" webkitdirectory directory multiple />
           </div>
         </aside>
 
@@ -110,7 +107,7 @@
               </div>
               <div class="result-summary">
                 <div class="metric">
-                  <span class="metric__label">Input Path</span>
+                  <span class="metric__label">Input</span>
                   <span id="grading-result-path" class="metric__value"></span>
                 </div>
                 <div class="metric">

@@ -7,12 +7,18 @@ from jsonschema import Draft202012Validator
 
 from src.quiz_pool.main import (
     AppState,
+    UploadedFile,
+    clear_grading_uploads,
+    grading_upload_label,
+    import_quiz_json_content_into_project,
     import_quiz_json_into_project,
     initialize_empty_project,
     load_active_quiz,
     load_internal_schema,
     load_project_generator_draft,
     normalize_system_file_dialog_request,
+    parse_multipart_uploads,
+    replace_grading_uploads,
     system_file_dialog_allowed,
     store_project_asset,
     write_project_generator_draft,
@@ -53,6 +59,27 @@ class ProjectStorageTests(unittest.TestCase):
             write_project_generator_draft(project_path, {"selection": {"questionCount": 3}})
             draft = load_project_generator_draft(project_path)
             self.assertEqual(draft["selection"]["questionCount"], 3)
+
+    def test_import_quiz_json_content_into_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir) / "course.quizpool"
+            validator = Draft202012Validator(load_internal_schema())
+            initialize_empty_project(project_path)
+            state = AppState(
+                db_path=project_path,
+                exam_store_path=project_path,
+                project_path=project_path,
+                validator=validator,
+            )
+
+            import_quiz_json_content_into_project(
+                project_path=project_path,
+                content=Path("sample_quiz.json").read_text(encoding="utf-8"),
+                validator=validator,
+            )
+
+            quiz = load_active_quiz(state)
+            self.assertGreater(len(quiz["questions"]), 0)
 
     def test_project_asset_upload_records_png_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -95,6 +122,46 @@ class ProjectStorageTests(unittest.TestCase):
 
         self.assertIsNone(request)
         self.assertEqual(errors[0]["path"], "mode")
+
+    def test_parse_multipart_uploads_reads_browser_file_fields(self) -> None:
+        boundary = "----quizpool-test"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="pdfs"; filename="scan.pdf"\r\n'
+            "Content-Type: application/pdf\r\n"
+            "\r\n"
+        ).encode("utf-8") + b"%PDF-1.7\n" + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        files = parse_multipart_uploads(f"multipart/form-data; boundary={boundary}", body)
+
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].field_name, "pdfs")
+        self.assertEqual(files[0].filename, "scan.pdf")
+        self.assertEqual(files[0].data, b"%PDF-1.7\n")
+
+    def test_replace_grading_uploads_writes_unique_pdf_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir) / "course.quizpool"
+            state = AppState(
+                db_path=project_path,
+                exam_store_path=project_path,
+                project_path=project_path,
+                validator=Draft202012Validator(load_internal_schema()),
+            )
+            try:
+                upload_path = replace_grading_uploads(
+                    state,
+                    [
+                        UploadedFile("pdfs", "scan.pdf", "application/pdf", b"%PDF-1.7\n"),
+                        UploadedFile("pdfs", "nested/scan.pdf", "application/pdf", b"%PDF-1.7\n"),
+                    ],
+                )
+
+                self.assertTrue((upload_path / "scan.pdf").is_file())
+                self.assertTrue((upload_path / "scan-2.pdf").is_file())
+                self.assertEqual(grading_upload_label(state.grading_upload_files), "Uploaded PDFs (2 files)")
+            finally:
+                clear_grading_uploads(state)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,3 @@
-import { openSystemFileDialog } from "./system-file-dialog.js";
 import { hasRichTextMarkup, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
 
 const state = {
@@ -36,6 +35,7 @@ const elements = {
   errorPanel: document.querySelector("#error-panel"),
   learningObjectives: document.querySelector("#learning-objectives"),
   importQuizJson: document.querySelector("#import-quiz-json"),
+  importQuizJsonFile: document.querySelector("#import-quiz-json-file"),
   metaPanelBody: document.querySelector("#meta-panel-body"),
   questionDifficulty: document.querySelector("#question-difficulty"),
   questionEditor: document.querySelector("#question-editor"),
@@ -692,14 +692,18 @@ async function saveQuiz() {
   setStatus(`Saved at ${new Date().toLocaleTimeString()}.`);
 }
 
-async function importQuizJson(path) {
+async function importQuizJson(file) {
   setStatus("Importing quiz JSON...");
+  const content = await file.text();
   const response = await fetch("/api/quiz/import-json", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({
+      filename: file.name,
+      content,
+    }),
   });
   const payload = await response.json();
   if (!response.ok) {
@@ -844,18 +848,19 @@ function wireGlobalFields() {
     renderQuestionPreviews(getSelectedQuestion());
   });
 
-  elements.importQuizJson.addEventListener("click", async () => {
+  elements.importQuizJson.addEventListener("click", () => {
+    elements.importQuizJsonFile.click();
+  });
+
+  elements.importQuizJsonFile.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    if (!file) {
+      setStatus("Import canceled.");
+      return;
+    }
     try {
-      const selectedPath = await openSystemFileDialog({
-        title: "Import Quiz JSON",
-        purpose: "quiz-json",
-        mode: "file",
-      });
-      if (!selectedPath) {
-        setStatus("Import canceled.");
-        return;
-      }
-      await importQuizJson(selectedPath);
+      await importQuizJson(file);
     } catch (error) {
       state.validationErrors = [{ path: "<import>", message: error.message }];
       renderErrors();

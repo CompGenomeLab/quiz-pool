@@ -221,6 +221,10 @@ textarea {
   transform: none;
 }
 
+.visually-hidden-file {
+  display: none;
+}
+
 .status-card {
   background: rgba(20, 108, 89, 0.08);
   border: 1px solid rgba(20, 108, 89, 0.14);

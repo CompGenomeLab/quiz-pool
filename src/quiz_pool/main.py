@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import base64
 import binascii
+from email.parser import BytesParser
+from email.policy import default as email_policy
 import hashlib
 import html
 import io
@@ -17,7 +19,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -107,6 +109,117 @@ class AppState:
     exam_store_path: Path
     project_path: Path
     validator: Draft202012Validator
+    grading_upload_tempdir: Any | None = None
+    grading_upload_path: Path | None = None
+    grading_upload_files: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class UploadedFile:
+    field_name: str
+    filename: str
+    content_type: str
+    data: bytes
+
+
+def clear_grading_uploads(state: AppState) -> None:
+    tempdir = state.grading_upload_tempdir
+    state.grading_upload_tempdir = None
+    state.grading_upload_path = None
+    state.grading_upload_files = []
+    if tempdir is not None:
+        tempdir.cleanup()
+
+
+def parse_multipart_uploads(content_type: str, body: bytes) -> list[UploadedFile]:
+    if not content_type.lower().startswith("multipart/form-data"):
+        raise ValueError("Expected multipart/form-data upload")
+
+    message = BytesParser(policy=email_policy).parsebytes(
+        (
+            f"Content-Type: {content_type}\r\n"
+            "MIME-Version: 1.0\r\n"
+            "\r\n"
+        ).encode("utf-8")
+        + body
+    )
+    if not message.is_multipart():
+        raise ValueError("Upload payload is not multipart")
+
+    files: list[UploadedFile] = []
+    for part in message.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        filename = part.get_filename()
+        if not filename:
+            continue
+        field_name = str(part.get_param("name", header="content-disposition") or "")
+        files.append(
+            UploadedFile(
+                field_name=field_name,
+                filename=filename,
+                content_type=part.get_content_type(),
+                data=part.get_payload(decode=True) or b"",
+            )
+        )
+    return files
+
+
+def sanitize_upload_filename(filename: str, *, default_name: str = "upload.pdf") -> str:
+    normalized = filename.replace("\\", "/")
+    name = Path(normalized).name.strip()
+    name = re.sub(r"[^A-Za-z0-9._ -]+", "-", name).strip(" .")
+    return name or default_name
+
+
+def unique_upload_filename(filename: str, used_names: set[str]) -> str:
+    path = Path(filename)
+    stem = path.stem or "upload"
+    suffix = path.suffix or ".pdf"
+    candidate = f"{stem}{suffix}"
+    index = 2
+    while candidate.lower() in used_names:
+        candidate = f"{stem}-{index}{suffix}"
+        index += 1
+    used_names.add(candidate.lower())
+    return candidate
+
+
+def replace_grading_uploads(state: AppState, files: list[UploadedFile]) -> Path:
+    tempdir = tempfile.TemporaryDirectory(prefix="quiz-pool-grading-")
+    temp_path = Path(tempdir.name)
+    written_files: list[str] = []
+    used_names: set[str] = set()
+
+    try:
+        for upload in files:
+            if not upload.data:
+                raise ValueError(f"Uploaded PDF is empty: {upload.filename}")
+            safe_name = sanitize_upload_filename(upload.filename)
+            if Path(safe_name).suffix.lower() != ".pdf":
+                raise ValueError(f"Uploaded file must be a PDF: {upload.filename}")
+            target_name = unique_upload_filename(safe_name, used_names)
+            (temp_path / target_name).write_bytes(upload.data)
+            written_files.append(target_name)
+        if not written_files:
+            raise ValueError("Upload at least one PDF file")
+    except Exception:
+        tempdir.cleanup()
+        raise
+
+    clear_grading_uploads(state)
+    state.grading_upload_tempdir = tempdir
+    state.grading_upload_path = temp_path
+    state.grading_upload_files = written_files
+    return temp_path
+
+
+def grading_upload_label(file_names: list[str]) -> str:
+    if not file_names:
+        return "Uploaded PDFs"
+    if len(file_names) == 1:
+        return f"Uploaded PDF: {file_names[0]}"
+    return f"Uploaded PDFs ({len(file_names)} files)"
 
 
 def default_project_path_for(db_path: Path) -> Path:
@@ -676,8 +789,20 @@ def import_quiz_json_into_project(
     return quiz
 
 
+def import_quiz_json_content_into_project(
+    *,
+    project_path: Path,
+    content: str,
+    validator: Draft202012Validator,
+) -> dict[str, Any]:
+    quiz = json.loads(content)
+    validate_quiz_payload(quiz, validator)
+    write_project_quiz(project_path, quiz)
+    return quiz
+
+
 def validation_errors(
-    validator: Draft202012Validator, payload: dict[str, Any]
+    validator: Draft202012Validator, payload: Any
 ) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     for error in sorted(validator.iter_errors(payload), key=lambda item: list(item.path)):
@@ -686,15 +811,22 @@ def validation_errors(
     return errors
 
 
+def validate_quiz_payload(payload: Any, validator: Draft202012Validator) -> None:
+    errors = validation_errors(validator, payload)
+    if errors:
+        message = "; ".join(f"{item['path']}: {item['message']}" for item in errors)
+        raise ValueError(f"Quiz file does not match the schema: {message}")
+    if not isinstance(payload, dict):
+        raise ValueError("Quiz file must contain a JSON object")
+
+
 def validate_quiz_file(path: Path, validator: Draft202012Validator) -> None:
     if not path.is_file():
         raise ValueError(f"Quiz file not found: {path}")
 
     quiz = load_json(path)
-    errors = validation_errors(validator, quiz)
-    if errors:
-        message = "; ".join(f"{item['path']}: {item['message']}" for item in errors)
-        raise ValueError(f"Quiz file does not match the schema: {message}")
+    validate_quiz_payload(quiz, validator)
+
 
 def load_active_quiz(state: AppState) -> dict[str, Any]:
     return load_project_quiz(state.project_path)
@@ -741,6 +873,7 @@ def set_active_project(
     if validation:
         message = "; ".join(f"{item['path']}: {item['message']}" for item in validation)
         raise ValueError(f"Project quiz document does not match the schema: {message}")
+    clear_grading_uploads(state)
     state.project_path = project_path
     state.db_path = project_path
     state.exam_store_path = project_path
@@ -1883,6 +2016,15 @@ def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
     }
 
 
+def grade_uploaded_exam_pdfs(state: AppState, uploads: list[UploadedFile]) -> dict[str, Any]:
+    input_path = replace_grading_uploads(state, uploads)
+    result = grade_exam_pdfs(state, input_path)
+    result["inputPath"] = grading_upload_label(state.grading_upload_files)
+    result["inputKind"] = "upload"
+    result["uploadedFiles"] = state.grading_upload_files
+    return result
+
+
 def build_annotation_answer_key(row: dict[str, Any]) -> dict[str, list[str]]:
     answer_key: dict[str, list[str]] = {}
     for question in row.get("questionDetails", []):
@@ -1972,6 +2114,36 @@ def annotate_exam_pdfs(state: AppState, input_path: Path, output_path: Path) -> 
             "usedAnswerKeyCount": sum(1 for row in annotation_rows if row["usedAnswerKey"]),
         },
     }
+
+
+def build_annotation_zip(result: dict[str, Any], output_path: Path) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for row in result.get("rows", []):
+            annotated_pdf = str(row.get("annotatedPdf") or "").strip()
+            if not annotated_pdf:
+                continue
+            annotated_path = Path(annotated_pdf)
+            if not annotated_path.is_file():
+                continue
+            try:
+                archive_name = str(annotated_path.relative_to(output_path))
+            except ValueError:
+                archive_name = annotated_path.name
+            archive.write(annotated_path, archive_name)
+        archive.writestr(
+            "annotation-results.json",
+            json.dumps(result, ensure_ascii=False, indent=2),
+        )
+    return buffer.getvalue()
+
+
+def annotate_exam_pdfs_zip(state: AppState, input_path: Path) -> tuple[bytes, dict[str, Any]]:
+    with tempfile.TemporaryDirectory(prefix="quiz-pool-annotated-") as temp_dir:
+        output_path = Path(temp_dir)
+        result = annotate_exam_pdfs(state, input_path, output_path)
+        result["outputPath"] = "annotated-pdfs.zip"
+        return build_annotation_zip(result, output_path), result
 
 
 def unrank_permutation(items: list[Any], rank: int) -> list[Any]:
@@ -3758,6 +3930,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/api/capabilities":
+                self.handle_get_capabilities()
+                return
             if parsed.path == "/api/project":
                 self.handle_get_project()
                 return
@@ -3826,8 +4001,14 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/exams/grade":
                 self.handle_grade_exams()
                 return
+            if parsed.path == "/api/exams/grade-upload":
+                self.handle_grade_uploaded_exams()
+                return
             if parsed.path == "/api/exams/annotate":
                 self.handle_annotate_exams()
+                return
+            if parsed.path == "/api/exams/annotate-upload":
+                self.handle_annotate_uploaded_exams()
                 return
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
@@ -3860,6 +4041,17 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             return payload, []
 
+        def read_upload_body(self) -> tuple[list[UploadedFile], list[dict[str, str]]]:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            if content_length <= 0:
+                return [], [{"path": "<body>", "message": "Empty upload body"}]
+
+            raw_body = self.rfile.read(content_length)
+            try:
+                return parse_multipart_uploads(self.headers.get("Content-Type", ""), raw_body), []
+            except ValueError as error:
+                return [], [{"path": "<upload>", "message": str(error)}]
+
         def session_payload(self, *, ok: bool = True) -> dict[str, Any]:
             return {
                 "ok": ok,
@@ -3868,6 +4060,15 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 "examStorePath": str(state.project_path),
                 "defaultProjectPath": display_default_project_path(),
             }
+
+        def handle_get_capabilities(self) -> None:
+            self.send_json(
+                {
+                    "uploads": True,
+                    "downloads": True,
+                    "serverPathPicker": True,
+                }
+            )
 
         def handle_get_quiz(self) -> None:
             quiz = load_active_quiz(state)
@@ -4002,10 +4203,29 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
                 return
 
+            raw_content = payload.get("content")
+            if isinstance(raw_content, str):
+                try:
+                    quiz = import_quiz_json_content_into_project(
+                        project_path=state.project_path,
+                        content=raw_content,
+                        validator=state.validator,
+                    )
+                    delete_project_generator_draft(state.project_path)
+                except (ValueError, json.JSONDecodeError) as error:
+                    self.send_json(
+                        {"ok": False, "errors": [{"path": "<import>", "message": str(error)}]},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+
+                self.send_json({"ok": True, "quiz": quiz, **self.session_payload()})
+                return
+
             raw_path = payload.get("path")
             if not isinstance(raw_path, str) or not raw_path.strip():
                 self.send_json(
-                    {"ok": False, "errors": [{"path": "path", "message": "Quiz JSON path is required"}]},
+                    {"ok": False, "errors": [{"path": "content", "message": "Quiz JSON content is required"}]},
                     status=HTTPStatus.BAD_REQUEST,
                 )
                 return
@@ -4338,6 +4558,32 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             input_path = Path(request["inputPath"]).expanduser().resolve()
             try:
                 result = grade_exam_pdfs(state, input_path)
+                clear_grading_uploads(state)
+                result["inputKind"] = "server-path"
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<grading>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            except OSError as error:
+                self.send_json(
+                    {"errors": [{"path": "<grading>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_json(result)
+
+        def handle_grade_uploaded_exams(self) -> None:
+            uploads, upload_errors = self.read_upload_body()
+            if upload_errors:
+                self.send_json({"errors": upload_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            pdf_uploads = [upload for upload in uploads if upload.field_name in {"pdfs", "files"}]
+            try:
+                result = grade_uploaded_exam_pdfs(state, pdf_uploads)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<grading>", "message": str(error)}]},
@@ -4382,6 +4628,45 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             self.send_json(result)
+
+        def handle_annotate_uploaded_exams(self) -> None:
+            if state.grading_upload_path is None or not state.grading_upload_path.exists():
+                self.send_json(
+                    {
+                        "errors": [
+                            {
+                                "path": "<annotation>",
+                                "message": "No uploaded grading PDFs are available for annotation. Run grading from uploaded PDFs first.",
+                            }
+                        ]
+                    },
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            try:
+                payload, result = annotate_exam_pdfs_zip(state, state.grading_upload_path)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<annotation>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            except OSError as error:
+                self.send_json(
+                    {"errors": [{"path": "<annotation>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_bytes(
+                payload,
+                content_type="application/zip",
+                filename="annotated-pdfs.zip",
+                headers={
+                    "X-Quiz-Pool-Annotated-Count": str(result["summary"]["annotatedCount"]),
+                },
+            )
 
         def serve_static(self, raw_path: str) -> None:
             request_path = raw_path or "/"
@@ -4434,11 +4719,14 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             *,
             content_type: str,
             filename: str,
+            headers: dict[str, str] | None = None,
             status: HTTPStatus = HTTPStatus.OK,
         ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -4520,6 +4808,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        clear_grading_uploads(app_state)
         server.server_close()
 
 

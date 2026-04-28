@@ -47,7 +47,7 @@ function renderErrors() {
 function render() {
   elements.currentProjectPath.textContent = state.currentProjectPath;
   elements.defaultProjectPath.textContent = state.defaultProjectPath;
-  elements.selectedProjectPath.textContent = state.selectedProjectPath || state.currentProjectPath;
+  elements.selectedProjectPath.value = state.selectedProjectPath || state.currentProjectPath;
   renderErrors();
 }
 
@@ -68,7 +68,7 @@ async function loadProject() {
 }
 
 async function openProject() {
-  const projectPath = state.selectedProjectPath || state.currentProjectPath;
+  const projectPath = elements.selectedProjectPath.value.trim() || state.selectedProjectPath || state.currentProjectPath;
   state.validationErrors = [];
   renderErrors();
   setStatus("Opening selected project...");
@@ -110,6 +110,7 @@ function wireEvents() {
         return;
       }
       state.selectedProjectPath = selectedPath;
+      elements.selectedProjectPath.value = selectedPath;
       state.validationErrors = [];
       render();
       setStatus("Project selected. Open it to switch the session.");
@@ -122,6 +123,10 @@ function wireEvents() {
 
   elements.applyProject.addEventListener("click", async () => {
     await openProject();
+  });
+
+  elements.selectedProjectPath.addEventListener("input", (event) => {
+    state.selectedProjectPath = event.target.value;
   });
 }
 

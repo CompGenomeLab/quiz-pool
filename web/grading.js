@@ -1,4 +1,3 @@
-import { openSystemFileDialog } from "./system-file-dialog.js";
 import { renderRichTextHtml } from "./rich-text.js";
 
 const state = {
@@ -7,6 +6,7 @@ const state = {
   busyTitle: "",
   dbPath: "",
   examStorePath: "",
+  gradingFiles: [],
   annotateModalOpen: false,
   isAnnotating: false,
   isGrading: false,
@@ -22,8 +22,6 @@ const elements = {
   annotateGradedPdfs: document.querySelector("#annotate-graded-pdfs"),
   annotateModal: document.querySelector("#annotate-modal"),
   annotateModalBackdrop: document.querySelector("#annotate-modal-backdrop"),
-  annotateOutputPath: document.querySelector("#annotate-output-path"),
-  browseAnnotateOutput: document.querySelector("#browse-annotate-output"),
   browseGradingFile: document.querySelector("#browse-grading-file"),
   browseGradingFolder: document.querySelector("#browse-grading-folder"),
   cancelAnnotateModal: document.querySelector("#cancel-annotate-modal"),
@@ -36,6 +34,8 @@ const elements = {
   gradingHeading: document.querySelector("#grading-heading"),
   gradingDuplicateCount: document.querySelector("#grading-duplicate-count"),
   gradingInputPath: document.querySelector("#grading-input-path"),
+  gradingPdfUpload: document.querySelector("#grading-pdf-upload"),
+  gradingFolderUpload: document.querySelector("#grading-folder-upload"),
   gradingKnownCount: document.querySelector("#grading-known-count"),
   gradingMismatchCount: document.querySelector("#grading-mismatch-count"),
   gradingOErrorCount: document.querySelector("#grading-omr-error-count"),
@@ -86,11 +86,10 @@ function openAnnotateModal() {
   if (!state.results) {
     return;
   }
-  elements.annotateOutputPath.value = defaultAnnotationOutputPath(state.results.inputPath);
   state.annotateModalOpen = true;
   renderAnnotateModal();
   window.setTimeout(() => {
-    elements.browseAnnotateOutput.focus();
+    elements.confirmAnnotateModal.focus();
   }, 0);
 }
 
@@ -186,17 +185,46 @@ function updateSortButton() {
   elements.sortCorrect.setAttribute("aria-label", `Sort by correct answers, ${directionLabel}`);
 }
 
-function defaultAnnotationOutputPath(inputPath) {
-  const normalized = String(inputPath || "").trim();
-  if (normalized === "") {
+function selectedPdfFiles(fileList) {
+  return [...(fileList ?? [])]
+    .filter((file) => file.name.toLowerCase().endsWith(".pdf"))
+    .sort((left, right) => {
+      const leftName = left.webkitRelativePath || left.name;
+      const rightName = right.webkitRelativePath || right.name;
+      return leftName.localeCompare(rightName);
+    });
+}
+
+function formatFileSelection(files) {
+  if (files.length === 0) {
     return "";
   }
-  if (normalized.toLowerCase().endsWith(".pdf")) {
-    const lastSlash = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
-    const baseDir = lastSlash >= 0 ? normalized.slice(0, lastSlash) : ".";
-    return `${baseDir}/annotated`;
+  if (files.length === 1) {
+    return files[0].webkitRelativePath || files[0].name;
   }
-  return `${normalized.replace(/[\\/]+$/u, "")}/annotated`;
+  const sample = files.slice(0, 2).map((file) => file.name).join(", ");
+  return files.length === 2 ? sample : `${files.length} PDFs selected (${sample}, ...)`;
+}
+
+function setGradingFiles(files) {
+  state.gradingFiles = files;
+  state.results = null;
+  state.annotationResults = null;
+  state.validationErrors = [];
+  elements.gradingInputPath.value = formatFileSelection(files);
+  renderErrors();
+  renderSummary();
+  setStatus(files.length ? `${files.length} PDF${files.length === 1 ? "" : "s"} selected.` : "No PDFs selected.");
+}
+
+function downloadBlob(blob, filename) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
 }
 
 function downloadGradingCsv() {
@@ -249,32 +277,6 @@ function downloadGradingCsv() {
   URL.revokeObjectURL(link.href);
 }
 
-async function chooseSystemPath({ title, purpose, mode, startPath, onSelect, statusMessage }) {
-  try {
-    setStatus("Opening system file picker...");
-    const selectedPath = await openSystemFileDialog({
-      title,
-      purpose,
-      mode,
-      startPath,
-    });
-    if (!selectedPath) {
-      setStatus("Selection canceled.");
-      return;
-    }
-    onSelect(selectedPath);
-    state.validationErrors = [];
-    renderErrors();
-    if (statusMessage) {
-      setStatus(statusMessage);
-    }
-  } catch (error) {
-    state.validationErrors = [{ path: "<file-dialog>", message: error.message }];
-    renderErrors();
-    setStatus(error.message, true);
-  }
-}
-
 function renderSummary() {
   const result = state.results;
   const hasResult = Boolean(result);
@@ -282,7 +284,11 @@ function renderSummary() {
   const isBusy = state.isGrading || state.isAnnotating;
   elements.annotateGradedPdfs.disabled = !hasResult || isBusy;
   elements.exportGradingCsv.disabled = !hasResult || isBusy;
-  elements.runGrading.disabled = isBusy;
+  elements.runGrading.disabled = isBusy || state.gradingFiles.length === 0;
+  elements.browseGradingFile.disabled = isBusy;
+  elements.browseGradingFolder.disabled = isBusy;
+  elements.gradingPdfUpload.disabled = isBusy;
+  elements.gradingFolderUpload.disabled = isBusy;
   elements.gradingInputPath.disabled = isBusy;
   elements.sortCorrect.disabled = isBusy;
   updateSortButton();
@@ -433,7 +439,13 @@ async function loadPaths() {
 }
 
 async function runGrading() {
-  const inputPath = elements.gradingInputPath.value.trim();
+  if (state.gradingFiles.length === 0) {
+    state.validationErrors = [{ path: "pdfs", message: "Choose at least one PDF before running grading." }];
+    renderErrors();
+    setStatus("Choose at least one PDF before running grading.", true);
+    return;
+  }
+
   state.validationErrors = [];
   renderErrors();
   state.isGrading = true;
@@ -446,12 +458,14 @@ async function runGrading() {
   setStatus("Running omr-grade...");
 
   try {
-    const response = await fetch("/api/exams/grade", {
+    const formData = new FormData();
+    for (const file of state.gradingFiles) {
+      formData.append("pdfs", file, file.webkitRelativePath || file.name);
+    }
+
+    const response = await fetch("/api/exams/grade-upload", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ inputPath }),
+      body: formData,
     });
 
     const payload = await response.json();
@@ -482,13 +496,6 @@ async function annotateGradedPdfs() {
     return;
   }
 
-  const trimmedOutputPath = elements.annotateOutputPath.value.trim();
-  if (trimmedOutputPath === "") {
-    setStatus("Output folder path is required for OMR annotation.", true);
-    elements.annotateOutputPath.focus();
-    return;
-  }
-
   closeAnnotateModal();
   state.validationErrors = [];
   renderErrors();
@@ -496,35 +503,31 @@ async function annotateGradedPdfs() {
   setBusyState(
     true,
     "Annotating PDFs",
-    "Please wait while omr-annotate writes annotated review PDFs to the selected output folder.",
+    "Please wait while omr-annotate packages annotated review PDFs.",
   );
   renderSummary();
   setStatus("Running omr-annotate...");
 
   try {
-    const response = await fetch("/api/exams/annotate", {
+    const response = await fetch("/api/exams/annotate-upload", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        inputPath: state.results.inputPath,
-        outputPath: trimmedOutputPath,
-      }),
     });
 
-    const payload = await response.json();
     if (!response.ok) {
+      const payload = await response.json();
       state.validationErrors = payload.errors ?? [{ path: "<unknown>", message: "Annotation failed" }];
       renderErrors();
       setStatus("Annotation failed. Review the messages.", true);
       return;
     }
 
-    state.annotationResults = payload;
+    const blob = await response.blob();
+    const annotatedCount = response.headers.get("X-Quiz-Pool-Annotated-Count");
+    downloadBlob(blob, "annotated-pdfs.zip");
+    state.annotationResults = { annotatedCount };
     state.validationErrors = [];
     renderErrors();
-    setStatus(`Annotated ${payload.summary.annotatedCount} PDF(s) into ${payload.outputPath}.`);
+    setStatus(`Downloaded annotated PDF package${annotatedCount ? ` (${annotatedCount} PDF${annotatedCount === "1" ? "" : "s"})` : ""}.`);
   } finally {
     setBusyState(false);
     renderSummary();
@@ -532,42 +535,30 @@ async function annotateGradedPdfs() {
 }
 
 function wireEvents() {
-  elements.browseGradingFile.addEventListener("click", async () => {
-    await chooseSystemPath({
-      title: "Choose Grading PDF",
-      purpose: "pdf-or-dir",
-      mode: "file",
-      startPath: elements.gradingInputPath.value.trim(),
-      onSelect: (selectedPath) => {
-        elements.gradingInputPath.value = selectedPath;
-      },
-      statusMessage: "Scan PDF selected.",
-    });
+  if (!("webkitdirectory" in elements.gradingFolderUpload)) {
+    elements.browseGradingFolder.hidden = true;
+  }
+
+  elements.browseGradingFile.addEventListener("click", () => {
+    elements.gradingPdfUpload.click();
   });
-  elements.browseGradingFolder.addEventListener("click", async () => {
-    await chooseSystemPath({
-      title: "Choose Grading Folder",
-      purpose: "pdf-or-dir",
-      mode: "directory",
-      startPath: elements.gradingInputPath.value.trim(),
-      onSelect: (selectedPath) => {
-        elements.gradingInputPath.value = selectedPath;
-      },
-      statusMessage: "Scan folder selected.",
-    });
+
+  elements.browseGradingFolder.addEventListener("click", () => {
+    elements.gradingFolderUpload.click();
   });
-  elements.browseAnnotateOutput.addEventListener("click", async () => {
-    await chooseSystemPath({
-      title: "Choose Output Folder",
-      purpose: "directory",
-      mode: "directory",
-      startPath: elements.annotateOutputPath.value.trim(),
-      onSelect: (selectedPath) => {
-        elements.annotateOutputPath.value = selectedPath;
-      },
-      statusMessage: "Output folder selected.",
-    });
+
+  elements.gradingPdfUpload.addEventListener("change", (event) => {
+    const files = selectedPdfFiles(event.target.files);
+    event.target.value = "";
+    setGradingFiles(files);
   });
+
+  elements.gradingFolderUpload.addEventListener("change", (event) => {
+    const files = selectedPdfFiles(event.target.files);
+    event.target.value = "";
+    setGradingFiles(files);
+  });
+
   elements.annotateGradedPdfs.addEventListener("click", () => {
     openAnnotateModal();
   });
@@ -598,7 +589,7 @@ function wireEvents() {
       closeAnnotateModal();
       return;
     }
-    if (event.key === "Enter" && document.activeElement === elements.annotateOutputPath) {
+    if (event.key === "Enter") {
       event.preventDefault();
       await annotateGradedPdfs();
     }
@@ -607,6 +598,7 @@ function wireEvents() {
 
 wireEvents();
 renderAnnotateModal();
+renderSummary();
 loadPaths().catch((error) => {
   console.error(error);
   setStatus(error.message, true);

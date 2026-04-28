@@ -64,10 +64,10 @@ Editor's import action to bulk import a quiz JSON into the active project.
 ## Web Interface
 
 - `Welcome`: choose the active `.quizpool` project DB for the current server session
-- `Editor`: edit quiz metadata, bulk import quiz JSON, learning objectives, questions, choices, points, explanations, and references
+- `Editor`: edit quiz metadata, upload quiz JSON for bulk import, learning objectives, questions, choices, points, explanations, and references
 - `Exam Generator`: filter the pool, generate saved exam sets, preview variants, and download printable PDFs
 - `Exam Viewer`: reopen saved exam sets, inspect variants, and re-download the printable ZIP
-- `Grading`: run `omr-grade`, review mismatches, export CSV, and generate annotated PDFs with `omr-annotate`
+- `Grading`: upload completed PDFs, run `omr-grade`, review mismatches, export CSV, and download annotated PDFs generated with `omr-annotate`
 
 ## Math And Printables
 
@@ -115,7 +115,7 @@ It also:
 
 - computes earned points and possible points
 - exports the student summary table to CSV
-- writes annotated PDFs named like `rowIndex-studentId-annotated.pdf`
+- packages annotated PDFs named like `rowIndex-studentId-annotated.pdf` into a download ZIP
 
 For grading and annotation, make sure `pdftoppm` is installed and available on `PATH`.
 
