@@ -7,6 +7,8 @@ from omr.layout import PageLayout
 
 from src.quiz_pool.main import (
     LATEX_ENGINE,
+    append_pdf_documents,
+    build_omr_sheet_pdf_bytes,
     build_omr_sheet_config,
     build_question_pool_latex_document,
     build_latex_font_assets,
@@ -153,6 +155,16 @@ class LatexExportTests(unittest.TestCase):
         self.assertIn(r"\setmainfont{lmroman10-regular.otf}", question_pool_document)
         self.assertIn(r"\setmathfont{latinmodern-math.otf}", question_pool_document)
 
+    def test_latex_documents_request_a4_paper(self) -> None:
+        student_document = build_student_latex_document(sample_exam_set(), sample_variant())
+        question_pool_document = build_question_pool_latex_document(
+            sample_exam_set(),
+            sample_question_pool(),
+        )
+
+        self.assertIn(r"\usepackage[a4paper,margin=1in]{geometry}", student_document)
+        self.assertIn(r"\usepackage[a4paper,margin=1in]{geometry}", question_pool_document)
+
     def test_build_latex_font_assets_includes_vendored_fonts(self) -> None:
         assets = build_latex_font_assets()
         self.assertIn("lmroman10-regular.otf", assets)
@@ -185,8 +197,24 @@ class LatexExportTests(unittest.TestCase):
             build_question_pool_latex_document(sample_exam_set(), sample_question_pool()),
             job_name="question-pool-smoke",
         )
-        self.assertGreaterEqual(len(PdfReader(io.BytesIO(student_pdf)).pages), 1)
-        self.assertGreaterEqual(len(PdfReader(io.BytesIO(question_pool_pdf)).pages), 1)
+        student_reader = PdfReader(io.BytesIO(student_pdf))
+        question_pool_reader = PdfReader(io.BytesIO(question_pool_pdf))
+        self.assertGreaterEqual(len(student_reader.pages), 1)
+        self.assertGreaterEqual(len(question_pool_reader.pages), 1)
+
+        layout = PageLayout()
+        for reader in (student_reader, question_pool_reader):
+            for page in reader.pages:
+                self.assertAlmostEqual(float(page.mediabox.width), layout.page_width, places=2)
+                self.assertAlmostEqual(float(page.mediabox.height), layout.page_height, places=2)
+
+        omr_pdf = build_omr_sheet_pdf_bytes(sample_exam_set(), sample_variant())
+        combined_pdf = append_pdf_documents(student_pdf, omr_pdf)
+        combined_reader = PdfReader(io.BytesIO(combined_pdf))
+        self.assertGreaterEqual(len(combined_reader.pages), 2)
+        for page in combined_reader.pages:
+            self.assertAlmostEqual(float(page.mediabox.width), layout.page_width, places=2)
+            self.assertAlmostEqual(float(page.mediabox.height), layout.page_height, places=2)
 
 
 if __name__ == "__main__":
