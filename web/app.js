@@ -1,4 +1,4 @@
-import { browseFile } from "./file-browser.js";
+import { openSystemFileDialog } from "./system-file-dialog.js";
 import { hasRichTextMarkup, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
 
 const state = {
@@ -845,14 +845,22 @@ function wireGlobalFields() {
   });
 
   elements.importQuizJson.addEventListener("click", async () => {
-    const selectedPath = await browseFile({
-      title: "Import Quiz JSON",
-      purpose: "quiz-json",
-    });
-    if (!selectedPath) {
-      return;
+    try {
+      const selectedPath = await openSystemFileDialog({
+        title: "Import Quiz JSON",
+        purpose: "quiz-json",
+        mode: "file",
+      });
+      if (!selectedPath) {
+        setStatus("Import canceled.");
+        return;
+      }
+      await importQuizJson(selectedPath);
+    } catch (error) {
+      state.validationErrors = [{ path: "<import>", message: error.message }];
+      renderErrors();
+      setStatus(error.message, true);
     }
-    await importQuizJson(selectedPath);
   });
 
   elements.questionImageUpload.addEventListener("change", async (event) => {

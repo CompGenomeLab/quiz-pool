@@ -1,4 +1,4 @@
-import { browseFile } from "./file-browser.js";
+import { openSystemFileDialog } from "./system-file-dialog.js";
 import { renderRichTextHtml } from "./rich-text.js";
 
 const state = {
@@ -24,7 +24,8 @@ const elements = {
   annotateModalBackdrop: document.querySelector("#annotate-modal-backdrop"),
   annotateOutputPath: document.querySelector("#annotate-output-path"),
   browseAnnotateOutput: document.querySelector("#browse-annotate-output"),
-  browseGradingInput: document.querySelector("#browse-grading-input"),
+  browseGradingFile: document.querySelector("#browse-grading-file"),
+  browseGradingFolder: document.querySelector("#browse-grading-folder"),
   cancelAnnotateModal: document.querySelector("#cancel-annotate-modal"),
   confirmAnnotateModal: document.querySelector("#confirm-annotate-modal"),
   dbPath: document.querySelector("#db-path"),
@@ -246,6 +247,32 @@ function downloadGradingCsv() {
   link.click();
   link.remove();
   URL.revokeObjectURL(link.href);
+}
+
+async function chooseSystemPath({ title, purpose, mode, startPath, onSelect, statusMessage }) {
+  try {
+    setStatus("Opening system file picker...");
+    const selectedPath = await openSystemFileDialog({
+      title,
+      purpose,
+      mode,
+      startPath,
+    });
+    if (!selectedPath) {
+      setStatus("Selection canceled.");
+      return;
+    }
+    onSelect(selectedPath);
+    state.validationErrors = [];
+    renderErrors();
+    if (statusMessage) {
+      setStatus(statusMessage);
+    }
+  } catch (error) {
+    state.validationErrors = [{ path: "<file-dialog>", message: error.message }];
+    renderErrors();
+    setStatus(error.message, true);
+  }
 }
 
 function renderSummary() {
@@ -505,28 +532,41 @@ async function annotateGradedPdfs() {
 }
 
 function wireEvents() {
-  elements.browseGradingInput.addEventListener("click", async () => {
-    const selectedPath = await browseFile({
-      title: "Choose PDF Or Folder",
+  elements.browseGradingFile.addEventListener("click", async () => {
+    await chooseSystemPath({
+      title: "Choose Grading PDF",
       purpose: "pdf-or-dir",
+      mode: "file",
       startPath: elements.gradingInputPath.value.trim(),
+      onSelect: (selectedPath) => {
+        elements.gradingInputPath.value = selectedPath;
+      },
+      statusMessage: "Scan PDF selected.",
     });
-    if (!selectedPath) {
-      return;
-    }
-    elements.gradingInputPath.value = selectedPath;
-    setStatus("Scan source selected.");
+  });
+  elements.browseGradingFolder.addEventListener("click", async () => {
+    await chooseSystemPath({
+      title: "Choose Grading Folder",
+      purpose: "pdf-or-dir",
+      mode: "directory",
+      startPath: elements.gradingInputPath.value.trim(),
+      onSelect: (selectedPath) => {
+        elements.gradingInputPath.value = selectedPath;
+      },
+      statusMessage: "Scan folder selected.",
+    });
   });
   elements.browseAnnotateOutput.addEventListener("click", async () => {
-    const selectedPath = await browseFile({
+    await chooseSystemPath({
       title: "Choose Output Folder",
       purpose: "directory",
+      mode: "directory",
       startPath: elements.annotateOutputPath.value.trim(),
+      onSelect: (selectedPath) => {
+        elements.annotateOutputPath.value = selectedPath;
+      },
+      statusMessage: "Output folder selected.",
     });
-    if (!selectedPath) {
-      return;
-    }
-    elements.annotateOutputPath.value = selectedPath;
   });
   elements.annotateGradedPdfs.addEventListener("click", () => {
     openAnnotateModal();

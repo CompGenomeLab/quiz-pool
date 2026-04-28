@@ -1,4 +1,4 @@
-import { browseFile } from "./file-browser.js";
+import { openSystemFileDialog } from "./system-file-dialog.js";
 
 const state = {
   currentProjectPath: "",
@@ -97,17 +97,27 @@ async function openProject() {
 
 function wireEvents() {
   elements.browseProject.addEventListener("click", async () => {
-    const selectedPath = await browseFile({
-      title: "Open Project DB",
-      purpose: "project",
-      startPath: state.selectedProjectPath || state.currentProjectPath,
-    });
-    if (!selectedPath) {
-      return;
+    try {
+      setStatus("Opening system file picker...");
+      const selectedPath = await openSystemFileDialog({
+        title: "Open Project DB",
+        purpose: "project",
+        mode: "file",
+        startPath: state.selectedProjectPath || state.currentProjectPath,
+      });
+      if (!selectedPath) {
+        setStatus("Project selection canceled.");
+        return;
+      }
+      state.selectedProjectPath = selectedPath;
+      state.validationErrors = [];
+      render();
+      setStatus("Project selected. Open it to switch the session.");
+    } catch (error) {
+      state.validationErrors = [{ path: "<project>", message: error.message }];
+      renderErrors();
+      setStatus(error.message, true);
     }
-    state.selectedProjectPath = selectedPath;
-    render();
-    setStatus("Project selected. Open it to switch the session.");
   });
 
   elements.applyProject.addEventListener("click", async () => {

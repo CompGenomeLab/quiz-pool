@@ -15,6 +15,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 import zipfile
 
@@ -488,61 +489,175 @@ def latex_asset_name(asset_id: str, mime_type: str) -> str:
     return f"asset-{safe_id}{extension}"
 
 
-def file_browser_allowed(path: Path, purpose: str) -> bool:
-    if path.is_dir():
-        return True
-    suffix = path.suffix.lower()
-    if purpose == "project":
-        return suffix == DEFAULT_PROJECT_SUFFIX
-    if purpose == "quiz-json":
-        return suffix == ".json"
-    if purpose == "pdf-or-dir":
-        return suffix == ".pdf"
-    if purpose == "directory":
-        return False
-    return False
+SYSTEM_FILE_DIALOG_SCRIPT = r"""
+import json
+import sys
 
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+except Exception as error:
+    print(json.dumps({"ok": False, "error": f"Could not load the system file dialog: {error}"}))
+    sys.exit(0)
 
-def build_file_browser_payload(
-    *,
-    raw_path: str,
-    purpose: str,
-    fallback_path: Path,
-) -> dict[str, Any]:
-    requested = Path(raw_path).expanduser() if raw_path.strip() else fallback_path
-    current = requested.resolve()
-    if current.is_file():
-        current = current.parent
-    if not current.exists() or not current.is_dir():
-        current = fallback_path.resolve()
-    entries: list[dict[str, Any]] = []
+config = json.load(sys.stdin)
+try:
+    root = tk.Tk()
+except Exception as error:
+    print(json.dumps({"ok": False, "error": f"Could not open the system file dialog: {error}"}))
+    sys.exit(0)
+
+root.withdraw()
+try:
     try:
-        children = sorted(
-            current.iterdir(),
-            key=lambda item: (not item.is_dir(), item.name.lower()),
-        )
-    except OSError:
-        children = []
-    for child in children:
-        if child.name.startswith("."):
-            continue
-        if not file_browser_allowed(child, purpose):
-            continue
-        entries.append(
-            {
-                "name": child.name,
-                "path": str(child.resolve()),
-                "isDirectory": child.is_dir(),
-                "isFile": child.is_file(),
-            }
-        )
-    return {
-        "currentPath": str(current),
-        "parentPath": str(current.parent) if current.parent != current else "",
-        "homePath": str(Path.home()),
-        "purpose": purpose,
-        "entries": entries,
+        root.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+    root.update()
+    options = {
+        "title": config.get("title") or "Choose File",
+        "initialdir": config.get("initialDir") or None,
     }
+    if config.get("mode") == "directory":
+        selected_path = filedialog.askdirectory(mustexist=True, **options)
+    else:
+        selected_path = filedialog.askopenfilename(
+            filetypes=config.get("filetypes") or [("All files", "*")],
+            **options,
+        )
+    print(json.dumps({"ok": True, "path": selected_path or ""}))
+finally:
+    root.destroy()
+"""
+
+SYSTEM_FILE_DIALOG_PURPOSES: dict[str, dict[str, Any]] = {
+    "project": {
+        "title": "Open Project DB",
+        "modes": {"file"},
+        "suffixes": {DEFAULT_PROJECT_SUFFIX},
+        "filetypes": [("Quiz Pool projects", f"*{DEFAULT_PROJECT_SUFFIX}"), ("All files", "*")],
+        "description": "a Quiz Pool project DB",
+    },
+    "quiz-json": {
+        "title": "Import Quiz JSON",
+        "modes": {"file"},
+        "suffixes": {".json"},
+        "filetypes": [("JSON files", "*.json"), ("All files", "*")],
+        "description": "a JSON file",
+    },
+    "pdf-or-dir": {
+        "title": "Choose PDF Or Folder",
+        "modes": {"file", "directory"},
+        "suffixes": {".pdf"},
+        "filetypes": [("PDF files", "*.pdf"), ("All files", "*")],
+        "description": "a PDF file or directory",
+    },
+    "directory": {
+        "title": "Choose Folder",
+        "modes": {"directory"},
+        "suffixes": set(),
+        "filetypes": [],
+        "description": "a directory",
+    },
+}
+
+
+def resolve_system_dialog_initial_dir(raw_path: str, fallback_path: Path) -> Path:
+    candidates: list[Path] = []
+    if raw_path.strip():
+        requested = Path(raw_path).expanduser()
+        candidates.append(requested if requested.is_dir() else requested.parent)
+    candidates.extend([fallback_path, Path.home(), Path.cwd()])
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except OSError:
+            continue
+        if resolved.exists() and resolved.is_dir():
+            return resolved
+    return Path.cwd().resolve()
+
+
+def system_file_dialog_allowed(path: Path, purpose: str, mode: str) -> bool:
+    purpose_config = SYSTEM_FILE_DIALOG_PURPOSES.get(purpose)
+    if purpose_config is None or mode not in purpose_config["modes"]:
+        return False
+    if mode == "directory":
+        return path.is_dir()
+    return path.is_file() and path.suffix.lower() in purpose_config["suffixes"]
+
+
+def normalize_system_file_dialog_request(
+    payload: Any,
+    *,
+    fallback_path: Path,
+) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    if not isinstance(payload, dict):
+        return None, [{"path": "<body>", "message": "File dialog payload must be a JSON object"}]
+
+    errors: list[dict[str, str]] = []
+    purpose = normalize_optional_string(payload, "purpose", errors) or "project"
+    mode = normalize_optional_string(payload, "mode", errors) or "file"
+    title = normalize_optional_string(payload, "title", errors)
+    start_path = normalize_optional_string(payload, "startPath", errors)
+    if errors:
+        return None, errors
+
+    purpose_config = SYSTEM_FILE_DIALOG_PURPOSES.get(purpose)
+    if purpose_config is None:
+        return None, [{"path": "purpose", "message": "Unsupported file dialog purpose"}]
+    if mode not in {"file", "directory"}:
+        return None, [{"path": "mode", "message": "File dialog mode must be file or directory"}]
+    if mode not in purpose_config["modes"]:
+        return None, [{"path": "mode", "message": f"{purpose} selection does not support {mode} mode"}]
+
+    return (
+        {
+            "purpose": purpose,
+            "mode": mode,
+            "title": title or purpose_config["title"],
+            "initialDir": str(resolve_system_dialog_initial_dir(start_path, fallback_path)),
+            "filetypes": purpose_config["filetypes"],
+        },
+        [],
+    )
+
+
+def choose_system_file_dialog_path(request: dict[str, Any]) -> Path | None:
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", SYSTEM_FILE_DIALOG_SCRIPT],
+            input=json.dumps(request),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except OSError as error:
+        raise RuntimeError(f"Could not open the system file dialog: {error}") from error
+
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or "The system file dialog exited unexpectedly."
+        raise RuntimeError(message)
+
+    try:
+        payload = json.loads(completed.stdout.strip() or "{}")
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"The system file dialog returned invalid output: {error.msg}") from error
+
+    if not payload.get("ok"):
+        raise RuntimeError(str(payload.get("error") or "Could not open the system file dialog."))
+
+    raw_path = str(payload.get("path") or "").strip()
+    if not raw_path:
+        return None
+
+    selected_path = Path(raw_path).expanduser().resolve()
+    if not system_file_dialog_allowed(selected_path, str(request["purpose"]), str(request["mode"])):
+        description = SYSTEM_FILE_DIALOG_PURPOSES[str(request["purpose"])]["description"]
+        raise ValueError(f"Selected path must be {description}: {selected_path}")
+    return selected_path
 
 
 def initialize_empty_project(project_path: Path) -> None:
@@ -3646,9 +3761,6 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/project":
                 self.handle_get_project()
                 return
-            if parsed.path == "/api/file-browser":
-                self.handle_file_browser(parsed.query)
-                return
             if parsed.path == "/api/session-paths":
                 self.handle_get_session_paths()
                 return
@@ -3692,6 +3804,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             if parsed.path == "/api/project/open":
                 self.handle_open_project()
+                return
+            if parsed.path == "/api/system-file-dialog":
+                self.handle_system_file_dialog()
                 return
             if parsed.path == "/api/session-paths":
                 self.handle_update_session_paths()
@@ -3766,19 +3881,42 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
         def handle_get_project(self) -> None:
             self.send_json(self.session_payload())
 
-        def handle_file_browser(self, query: str) -> None:
-            params = parse_qs(query)
-            purpose = (params.get("purpose", ["project"])[0] or "project").strip()
-            if purpose not in {"project", "quiz-json", "pdf-or-dir", "directory"}:
-                purpose = "project"
-            raw_path = params.get("path", [""])[0] or ""
+        def handle_system_file_dialog(self) -> None:
+            payload, body_errors = self.read_json_body()
+            if body_errors:
+                self.send_json({"ok": False, "errors": body_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
             fallback_path = state.project_path.parent if state.project_path else Path.cwd()
-            self.send_json(
-                build_file_browser_payload(
-                    raw_path=raw_path,
-                    purpose=purpose,
-                    fallback_path=fallback_path,
+            request, request_errors = normalize_system_file_dialog_request(
+                payload,
+                fallback_path=fallback_path,
+            )
+            if request_errors:
+                self.send_json({"ok": False, "errors": request_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            try:
+                selected_path = choose_system_file_dialog_path(request)
+            except ValueError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<file-dialog>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
                 )
+                return
+            except RuntimeError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<file-dialog>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_json(
+                {
+                    "ok": True,
+                    "canceled": selected_path is None,
+                    "path": str(selected_path) if selected_path else "",
+                }
             )
 
         def handle_get_session_paths(self) -> None:

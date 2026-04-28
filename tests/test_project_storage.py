@@ -12,6 +12,8 @@ from src.quiz_pool.main import (
     load_active_quiz,
     load_internal_schema,
     load_project_generator_draft,
+    normalize_system_file_dialog_request,
+    system_file_dialog_allowed,
     store_project_asset,
     write_project_generator_draft,
 )
@@ -66,6 +68,33 @@ class ProjectStorageTests(unittest.TestCase):
             self.assertEqual(asset["width"], 1)
             self.assertEqual(asset["height"], 1)
             self.assertEqual(asset["sizeBytes"], len(ONE_PIXEL_PNG))
+
+    def test_system_file_dialog_allows_expected_selection_types(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            project_path = temp_path / "course.quizpool"
+            quiz_json_path = temp_path / "quiz.json"
+            pdf_path = temp_path / "scan.pdf"
+            project_path.write_text("", encoding="utf-8")
+            quiz_json_path.write_text("{}", encoding="utf-8")
+            pdf_path.write_bytes(b"%PDF-1.7\n")
+
+            self.assertTrue(system_file_dialog_allowed(project_path, "project", "file"))
+            self.assertTrue(system_file_dialog_allowed(quiz_json_path, "quiz-json", "file"))
+            self.assertTrue(system_file_dialog_allowed(pdf_path, "pdf-or-dir", "file"))
+            self.assertTrue(system_file_dialog_allowed(temp_path, "pdf-or-dir", "directory"))
+            self.assertTrue(system_file_dialog_allowed(temp_path, "directory", "directory"))
+            self.assertFalse(system_file_dialog_allowed(project_path, "quiz-json", "file"))
+            self.assertFalse(system_file_dialog_allowed(temp_path, "project", "directory"))
+
+    def test_system_file_dialog_request_rejects_unsupported_mode(self) -> None:
+        request, errors = normalize_system_file_dialog_request(
+            {"purpose": "project", "mode": "directory"},
+            fallback_path=Path.cwd(),
+        )
+
+        self.assertIsNone(request)
+        self.assertEqual(errors[0]["path"], "mode")
 
 
 if __name__ == "__main__":
