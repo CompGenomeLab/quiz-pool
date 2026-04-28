@@ -38,7 +38,7 @@ def sample_exam_set() -> dict:
             "allowedMaterials": "One handwritten note sheet",
             "omrInstructions": "Fully fill bubbles.",
             "examRules": [
-                "Fully fill bubbles. Do not leave any Student ID column blank. Include leading zeros.",
+                "Fill bubbles fully. Complete all ID columns with leading zeros (e.g., 00012345).",
                 "Read every question carefully and select all correct answers for each question.",
             ],
         },
