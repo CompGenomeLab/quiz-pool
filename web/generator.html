@@ -60,55 +60,6 @@
             <p id="generator-status" class="status-card__hint">Loading quiz data...</p>
           </div>
 
-          <div class="stack">
-            <div class="panel__subhead">
-              <h3>Printable Metadata</h3>
-              <p>These fields are written into each student printable and the shared question-pool document.</p>
-            </div>
-            <div class="field-grid">
-              <label class="field field--full">
-                <span>Institution Name</span>
-                <input id="institution-name" type="text" />
-              </label>
-              <label class="field field--full">
-                <span>Exam Name</span>
-                <input id="exam-name" type="text" />
-              </label>
-              <label class="field">
-                <span>Course Name</span>
-                <input id="course-name" type="text" />
-              </label>
-              <label class="field">
-                <span>Exam Date</span>
-                <input id="exam-date" type="date" />
-              </label>
-              <label class="field">
-                <span>Start Time</span>
-                <input id="start-time" type="time" />
-              </label>
-              <label class="field">
-                <span>Total Time (Minutes)</span>
-                <input id="total-time-minutes" type="number" min="1" step="1" />
-              </label>
-              <label class="field">
-                <span>Instructor</span>
-                <input id="instructor" type="text" />
-              </label>
-              <label class="field">
-                <span>Materials</span>
-                <input id="allowed-materials" type="text" />
-              </label>
-              <label class="field field--full">
-                <span>OMR Instructions</span>
-                <textarea id="omr-instructions" rows="3"></textarea>
-              </label>
-              <label class="field field--full">
-                <span>Exam Rules</span>
-                <textarea id="exam-rules" rows="6" placeholder="One rule per line"></textarea>
-              </label>
-            </div>
-          </div>
-
           <div class="field-grid">
             <label class="field">
               <span>Questions Per Exam</span>
@@ -167,11 +118,9 @@
 
           <div class="sidebar__actions">
             <button id="generate-exams" class="button button--primary" type="button">Generate Variants</button>
-            <button id="export-json" class="button button--ghost" type="button" disabled>Export JSON</button>
           </div>
 
           <div class="sidebar__actions">
-            <button id="print-results" class="button button--ghost" type="button" disabled>Download Print ZIP</button>
             <button id="reset-overrides" class="button button--ghost" type="button">Reset Overrides</button>
           </div>
         </aside>
@@ -291,8 +240,8 @@
               </div>
             </div>
             <p class="helper-copy no-print">
-                The ZIP download includes one teacher-facing question-pool PDF and one QR-coded printable
-                PDF per student variant without visible raw IDs.
+                These previews show the generated question and choice order. Open the exam in Exam Viewer to edit
+                printable metadata and download PDFs.
             </p>
             <div id="variant-previews" class="variant-stack"></div>
           </section>

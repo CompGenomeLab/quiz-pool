@@ -40,33 +40,23 @@ function defaultExamRules(omrInstructions = DEFAULT_OMR_INSTRUCTIONS) {
 const elements = {
   availableCount: document.querySelector("#available-count"),
   sourceFilters: document.querySelector("#source-filters"),
-  courseName: document.querySelector("#course-name"),
   dbPath: document.querySelector("#db-path"),
   difficultyFilters: document.querySelector("#difficulty-filters"),
-  examDate: document.querySelector("#exam-date"),
-  examName: document.querySelector("#exam-name"),
-  omrInstructions: document.querySelector("#omr-instructions"),
-  examRules: document.querySelector("#exam-rules"),
   examStorePath: document.querySelector("#exam-store-path"),
   errorList: document.querySelector("#generator-error-list"),
   errorPanel: document.querySelector("#generator-errors"),
   excludedCount: document.querySelector("#excluded-count"),
-  exportJson: document.querySelector("#export-json"),
   filteredCount: document.querySelector("#filtered-count"),
   generateExams: document.querySelector("#generate-exams"),
   generatorStatus: document.querySelector("#generator-status"),
   includedCount: document.querySelector("#included-count"),
-  institutionName: document.querySelector("#institution-name"),
-  instructor: document.querySelector("#instructor"),
   objectiveFilters: document.querySelector("#objective-filters"),
-  allowedMaterials: document.querySelector("#allowed-materials"),
   poolTableBody: document.querySelector("#pool-table-body"),
   poolQuestionBackdrop: document.querySelector("#pool-question-backdrop"),
   poolQuestionDetail: document.querySelector("#pool-question-detail"),
   poolQuestionEditLink: document.querySelector("#pool-question-edit-link"),
   poolQuestionModal: document.querySelector("#pool-question-modal"),
   poolQuestionTitle: document.querySelector("#pool-question-title"),
-  printResults: document.querySelector("#print-results"),
   questionCount: document.querySelector("#question-count"),
   resetOverrides: document.querySelector("#reset-overrides"),
   resultCourseName: document.querySelector("#result-course-name"),
@@ -80,29 +70,10 @@ const elements = {
   results: document.querySelector("#generation-results"),
   closePoolQuestion: document.querySelector("#close-pool-question"),
   sortStatus: document.querySelector("#sort-status"),
-  startTime: document.querySelector("#start-time"),
   teacherSummaryBody: document.querySelector("#teacher-summary-body"),
-  totalTimeMinutes: document.querySelector("#total-time-minutes"),
   variantCount: document.querySelector("#variant-count"),
   variantPreviews: document.querySelector("#variant-previews"),
 };
-
-function printableMetadata() {
-  const totalTimeRaw = elements.totalTimeMinutes.value.trim();
-  const parsedTotalTime = totalTimeRaw === "" ? null : Number.parseInt(totalTimeRaw, 10);
-  return {
-    institutionName: elements.institutionName.value.trim(),
-    examName: elements.examName.value.trim(),
-    courseName: elements.courseName.value.trim(),
-    examDate: elements.examDate.value.trim(),
-    startTime: elements.startTime.value.trim(),
-    totalTimeMinutes: Number.isFinite(parsedTotalTime) ? parsedTotalTime : null,
-    instructor: elements.instructor.value.trim(),
-    allowedMaterials: elements.allowedMaterials.value.trim(),
-    omrInstructions: elements.omrInstructions.value.trim(),
-    examRules: parseExamRules(elements.examRules.value),
-  };
-}
 
 function normalizeTextValue(value, fallback = "") {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
@@ -662,8 +633,6 @@ function renderGeneratedRun() {
   const run = state.generatedRun;
   const hasRun = Boolean(run);
   elements.results.classList.toggle("hidden", !hasRun);
-  elements.exportJson.disabled = !hasRun;
-  elements.printResults.disabled = !hasRun;
 
   if (!hasRun) {
     elements.teacherSummaryBody.replaceChildren();
@@ -785,7 +754,7 @@ function renderGeneratedRun() {
     const rules = document.createElement("div");
     rules.className = "variant-card__block";
     const rulesMarkup = printSettings.examRules
-      .map((rule) => `<li>${escapeHtml(rule)}</li>`)
+      .map((rule) => `<li>${renderRichTextHtml(rule)}</li>`)
       .join("");
     rules.innerHTML = `
       <h4>Exam Rules</h4>
@@ -853,7 +822,6 @@ function currentDraft() {
       overrides: { ...state.selection.overrides },
     },
     statusSortDirection: state.statusSortDirection,
-    printableMetadata: printableMetadata(),
     lastGeneratedExamSetId: state.generatedRun?.examSetId ?? "",
   };
 }
@@ -925,17 +893,6 @@ function applyGeneratorDraft(draft) {
     }
   }
 
-  const metadata = draft.printableMetadata && typeof draft.printableMetadata === "object" ? draft.printableMetadata : {};
-  elements.institutionName.value = typeof metadata.institutionName === "string" ? metadata.institutionName : elements.institutionName.value;
-  elements.examName.value = typeof metadata.examName === "string" ? metadata.examName : elements.examName.value;
-  elements.courseName.value = typeof metadata.courseName === "string" ? metadata.courseName : elements.courseName.value;
-  elements.examDate.value = typeof metadata.examDate === "string" ? metadata.examDate : elements.examDate.value;
-  elements.startTime.value = typeof metadata.startTime === "string" ? metadata.startTime : elements.startTime.value;
-  elements.totalTimeMinutes.value = Number.isInteger(metadata.totalTimeMinutes) ? String(metadata.totalTimeMinutes) : elements.totalTimeMinutes.value;
-  elements.instructor.value = typeof metadata.instructor === "string" ? metadata.instructor : elements.instructor.value;
-  elements.allowedMaterials.value = typeof metadata.allowedMaterials === "string" ? metadata.allowedMaterials : elements.allowedMaterials.value;
-  elements.omrInstructions.value = typeof metadata.omrInstructions === "string" ? metadata.omrInstructions : elements.omrInstructions.value;
-  elements.examRules.value = Array.isArray(metadata.examRules) ? metadata.examRules.join("\n") : elements.examRules.value;
   state.statusSortDirection = draft.statusSortDirection === "reverse" ? "reverse" : "default";
 }
 
@@ -969,17 +926,6 @@ async function loadQuiz() {
   state.selection.questionCount = Math.max(1, Math.min(10, state.quiz.questions.length));
   state.selection.questionCount = Math.min(state.selection.questionCount, MAX_QUESTIONS_PER_EXAM);
   state.selection.variantCount = 1;
-  if (!elements.examName.value.trim()) {
-    elements.examName.value = state.quiz.title ?? "";
-  }
-  if (!elements.omrInstructions.value.trim()) {
-    elements.omrInstructions.value = DEFAULT_OMR_INSTRUCTIONS;
-  }
-  if (!elements.examRules.value.trim()) {
-    elements.examRules.value = defaultExamRules(
-      elements.omrInstructions.value.trim() || DEFAULT_OMR_INSTRUCTIONS,
-    ).join("\n");
-  }
   const draft = await loadGeneratorDraft();
   applyGeneratorDraft(draft);
   await restoreGeneratedRunFromDraft(draft);
@@ -1017,7 +963,6 @@ async function generateExams() {
     learningObjectiveIds: [...state.selection.learningObjectiveIds],
     includeQuestionIds: selectedOverrideIds("include"),
     excludeQuestionIds: selectedOverrideIds("exclude"),
-    ...printableMetadata(),
   };
 
   const response = await fetch("/api/exams/generate", {
@@ -1044,78 +989,7 @@ async function generateExams() {
   setStatus(`Generated ${result.variants.length} variant(s) for exam set ${result.examSetId}.`);
 }
 
-function exportRun() {
-  if (!state.generatedRun) {
-    return;
-  }
-  const blob = new Blob([JSON.stringify(state.generatedRun, null, 2)], { type: "application/json" });
-  const link = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-  link.href = url;
-  link.download = `exam-set-${state.generatedRun.examSetId}.json`;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-async function downloadPrintableZip() {
-  if (!state.generatedRun) {
-    return;
-  }
-
-  setStatus("Preparing printable ZIP...");
-  const response = await fetch(`/api/exams/export/${encodeURIComponent(state.generatedRun.examSetId)}.zip`);
-  if (!response.ok) {
-    let message = `Printable export failed (${response.status})`;
-    try {
-      const payload = await response.json();
-      message = payload.errors?.[0]?.message ?? message;
-    } catch {
-      // Keep the fallback message if the response is not JSON.
-    }
-    setStatus(message, true);
-    return;
-  }
-
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `exam-set-${state.generatedRun.examSetId}-printables.zip`;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  setStatus(`Downloaded printable ZIP for exam set ${state.generatedRun.examSetId}.`);
-}
-
 function wireEvents() {
-  for (const element of [
-    elements.institutionName,
-    elements.examName,
-    elements.courseName,
-    elements.examDate,
-    elements.startTime,
-    elements.totalTimeMinutes,
-    elements.instructor,
-    elements.allowedMaterials,
-    elements.examRules,
-  ]) {
-    element.addEventListener("input", () => {
-      scheduleDraftSave();
-    });
-  }
-
-  elements.omrInstructions.addEventListener("input", () => {
-    const currentRules = parseExamRules(elements.examRules.value);
-    const omrInstructions = elements.omrInstructions.value.trim() || DEFAULT_OMR_INSTRUCTIONS;
-    if (
-      currentRules.length === 0
-      || JSON.stringify(currentRules) === JSON.stringify(defaultExamRules())
-      || JSON.stringify(currentRules) === JSON.stringify(defaultExamRules(currentRules[0] || DEFAULT_OMR_INSTRUCTIONS))
-    ) {
-      elements.examRules.value = defaultExamRules(omrInstructions).join("\n");
-    }
-    scheduleDraftSave();
-  });
-
   elements.questionCount.addEventListener("input", (event) => {
     const nextValue = Math.max(1, Number.parseInt(event.target.value || "1", 10));
     state.selection.questionCount = Math.min(MAX_QUESTIONS_PER_EXAM, nextValue);
@@ -1144,14 +1018,6 @@ function wireEvents() {
 
   elements.generateExams.addEventListener("click", async () => {
     await generateExams();
-  });
-
-  elements.exportJson.addEventListener("click", () => {
-    exportRun();
-  });
-
-  elements.printResults.addEventListener("click", () => {
-    void downloadPrintableZip();
   });
 
   elements.resetOverrides.addEventListener("click", () => {

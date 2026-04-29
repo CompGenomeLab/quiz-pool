@@ -67,14 +67,14 @@
 
 \newcommand{\mcqitem}[2]{%
   \item\relax
-  \begingroup
+  \begin{minipage}[t]{\linewidth}
     #1\par\nopagebreak[2]
     \vspace{0.3em}\nopagebreak[2]
     {\footnotesize\renewcommand{\arraystretch}{1.1}%
     \begin{tabularx}{\linewidth}{@{}>{\bfseries}lX@{}}
       #2
     \end{tabularx}}
-  \endgroup
+  \end{minipage}
 }
 
 \setlength{\headheight}{14pt}
@@ -148,11 +148,11 @@ Signature & \\
 {\small
 \setlength{\columnsep}{18pt}
 \raggedcolumns
-\begin{multicols}{2}
+\begin{multicols*}{2}
 \begin{qpquestions}
 %%QUIZPOOL_QUESTION_BLOCKS%%
 \end{qpquestions}
-\end{multicols}}
+\end{multicols*}}
 
 \vfill
 

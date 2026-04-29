@@ -17,10 +17,15 @@ from src.quiz_pool.main import (
     load_internal_schema,
     load_project_generator_draft,
     normalize_system_file_dialog_request,
+    normalize_print_settings_payload,
     parse_multipart_uploads,
     replace_grading_uploads,
     system_file_dialog_allowed,
     store_project_asset,
+    find_project_exam_set,
+    get_print_settings,
+    update_project_exam_set_print_settings,
+    upsert_project_exam_set,
     write_project_generator_draft,
 )
 
@@ -95,6 +100,41 @@ class ProjectStorageTests(unittest.TestCase):
             self.assertEqual(asset["width"], 1)
             self.assertEqual(asset["height"], 1)
             self.assertEqual(asset["sizeBytes"], len(ONE_PIXEL_PNG))
+
+    def test_project_exam_set_print_settings_update_preserves_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir) / "course.quizpool"
+            exam_set = {
+                "examSetId": "exam-set-001",
+                "generatedAt": "2026-04-29T10:00:00+00:00",
+                "quiz": {"title": "Original Quiz"},
+                "printSettings": {"examName": "Original Midterm"},
+                "selection": {"selectedQuestionIds": ["Q1"]},
+                "variants": [{"variantId": "variant-001", "questions": []}],
+            }
+            upsert_project_exam_set(project_path, exam_set)
+            print_settings, errors = normalize_print_settings_payload(
+                {
+                    "institutionName": "Updated University",
+                    "examName": "Updated Midterm",
+                    "courseName": "BIO101",
+                    "examRules": ["Use [math]x^2[/math]."],
+                }
+            )
+
+            self.assertEqual(errors, [])
+            updated = update_project_exam_set_print_settings(
+                project_path,
+                "exam-set-001",
+                print_settings,
+            )
+            stored = find_project_exam_set(project_path, "exam-set-001")
+
+            self.assertIsNotNone(updated)
+            self.assertEqual(stored["variants"], exam_set["variants"])
+            self.assertEqual(get_print_settings(stored)["examName"], "Updated Midterm")
+            self.assertEqual(get_print_settings(stored)["courseName"], "BIO101")
+            self.assertEqual(get_print_settings(stored)["examRules"], ["Use [math]x^2[/math]."])
 
     def test_system_file_dialog_allows_expected_selection_types(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

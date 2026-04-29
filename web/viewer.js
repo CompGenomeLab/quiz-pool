@@ -1,4 +1,4 @@
-import { renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
+import { hasRichTextMarkup, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
 
 const state = {
   examSets: [],
@@ -10,10 +10,27 @@ const state = {
   selectedVariantId: "",
   isDeletingExamSet: false,
   isDownloadingPrintableZip: false,
+  isUpdatingPrintSettings: false,
   statusIsError: false,
   statusMessage: "Loading exam sets...",
   validationErrors: [],
 };
+
+const DEFAULT_EXAM_RULES = [
+  "Fill bubbles fully. Complete all ID columns with leading zeros (e.g., 00012345).",
+  "Read every question carefully and select all correct answers for each question.",
+  "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
+  "Do not communicate with other students or use unauthorized materials during the exam.",
+  "Remain seated until instructed to stop and submit your paper.",
+];
+const DEFAULT_OMR_INSTRUCTIONS = DEFAULT_EXAM_RULES[0];
+
+function defaultExamRules(omrInstructions = DEFAULT_OMR_INSTRUCTIONS) {
+  return [
+    omrInstructions,
+    ...DEFAULT_EXAM_RULES.slice(1),
+  ];
+}
 
 const elements = {
   examSetList: document.querySelector("#exam-set-list"),
@@ -22,7 +39,19 @@ const elements = {
   errorList: document.querySelector("#viewer-error-list"),
   errorPanel: document.querySelector("#viewer-errors"),
   deleteExam: document.querySelector("#viewer-delete-exam"),
+  institutionName: document.querySelector("#viewer-institution-name"),
+  courseName: document.querySelector("#viewer-course-name"),
+  examDate: document.querySelector("#viewer-exam-date"),
+  printExamName: document.querySelector("#viewer-print-exam-name"),
+  omrInstructions: document.querySelector("#viewer-omr-instructions"),
+  examRules: document.querySelector("#viewer-exam-rules"),
+  examRulesPreview: document.querySelector("#viewer-exam-rules-preview"),
   printResults: document.querySelector("#viewer-print-results"),
+  updatePrintSettings: document.querySelector("#viewer-update-print-settings"),
+  startTime: document.querySelector("#viewer-start-time"),
+  totalTimeMinutes: document.querySelector("#viewer-total-time-minutes"),
+  instructor: document.querySelector("#viewer-instructor"),
+  allowedMaterials: document.querySelector("#viewer-allowed-materials"),
   results: document.querySelector("#viewer-results"),
   toggleQuestionPool: document.querySelector("#toggle-question-pool"),
   toggleVariants: document.querySelector("#toggle-variants"),
@@ -41,6 +70,19 @@ const elements = {
   viewerStatus: document.querySelector("#viewer-status"),
   viewerVariantCount: document.querySelector("#viewer-variant-count"),
 };
+
+const printSettingsElements = [
+  elements.institutionName,
+  elements.printExamName,
+  elements.courseName,
+  elements.examDate,
+  elements.startTime,
+  elements.totalTimeMinutes,
+  elements.instructor,
+  elements.allowedMaterials,
+  elements.omrInstructions,
+  elements.examRules,
+];
 
 function setStatus(message, isError = false) {
   state.statusMessage = message;
@@ -63,6 +105,143 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function normalizeTextValue(value, fallback = "") {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
+}
+
+function parseExamRules(value) {
+  return value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeExamRules(value) {
+  if (Array.isArray(value)) {
+    const rules = value.map((rule) => normalizeTextValue(rule)).filter(Boolean);
+    if (rules.length > 0) {
+      return rules;
+    }
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const rules = parseExamRules(value);
+    if (rules.length > 0) {
+      return rules;
+    }
+  }
+  return defaultExamRules();
+}
+
+function renderExamRulesPreview() {
+  const rules = parseExamRules(elements.examRules.value);
+  const hasMathRule = rules.some((rule) => hasRichTextMarkup(rule));
+  elements.examRulesPreview.classList.toggle("hidden", !hasMathRule);
+  elements.examRulesPreview.replaceChildren();
+  if (!hasMathRule) {
+    return;
+  }
+
+  const list = document.createElement("ol");
+  for (const rule of rules) {
+    const item = document.createElement("li");
+    renderRichTextIntoElement(item, rule);
+    list.append(item);
+  }
+  elements.examRulesPreview.append(list);
+}
+
+function printableMetadata() {
+  const totalTimeRaw = elements.totalTimeMinutes.value.trim();
+  const parsedTotalTime = totalTimeRaw === "" ? null : Number.parseInt(totalTimeRaw, 10);
+  return {
+    institutionName: elements.institutionName.value.trim(),
+    examName: elements.printExamName.value.trim(),
+    courseName: elements.courseName.value.trim(),
+    examDate: elements.examDate.value.trim(),
+    startTime: elements.startTime.value.trim(),
+    totalTimeMinutes: Number.isFinite(parsedTotalTime) ? parsedTotalTime : null,
+    instructor: elements.instructor.value.trim(),
+    allowedMaterials: elements.allowedMaterials.value.trim(),
+    omrInstructions: elements.omrInstructions.value.trim(),
+    examRules: parseExamRules(elements.examRules.value),
+  };
+}
+
+function normalizeTotalTimeForComparison(value) {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return "";
+  }
+  const numeric = Number.parseInt(text, 10);
+  return Number.isFinite(numeric) ? String(numeric) : text;
+}
+
+function normalizeRulesForComparison(value, useDefaultRules = false) {
+  if (useDefaultRules) {
+    return normalizeExamRules(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((rule) => normalizeTextValue(rule)).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return parseExamRules(value);
+  }
+  return [];
+}
+
+function normalizePrintSettingsForComparison(printSettings = {}, useDefaultRules = false) {
+  return {
+    institutionName: normalizeTextValue(printSettings.institutionName, ""),
+    examName: normalizeTextValue(printSettings.examName, ""),
+    courseName: normalizeTextValue(printSettings.courseName, ""),
+    examDate: normalizeTextValue(printSettings.examDate, ""),
+    startTime: normalizeTextValue(printSettings.startTime, ""),
+    totalTimeMinutes: normalizeTotalTimeForComparison(printSettings.totalTimeMinutes),
+    instructor: normalizeTextValue(printSettings.instructor, ""),
+    allowedMaterials: normalizeTextValue(printSettings.allowedMaterials, ""),
+    omrInstructions: normalizeTextValue(printSettings.omrInstructions, ""),
+    examRules: normalizeRulesForComparison(printSettings.examRules, useDefaultRules),
+  };
+}
+
+function printSettingsHaveUnsavedChanges() {
+  if (!state.selectedExamSet) {
+    return false;
+  }
+  const current = normalizePrintSettingsForComparison(printableMetadata(), false);
+  const saved = normalizePrintSettingsForComparison(
+    state.selectedExamSet.examSet.printSettings,
+    true,
+  );
+  return JSON.stringify(current) !== JSON.stringify(saved);
+}
+
+function populatePrintSettingsForm(printSettings = {}) {
+  elements.institutionName.value = normalizeTextValue(printSettings.institutionName, "");
+  elements.printExamName.value = normalizeTextValue(printSettings.examName, "");
+  elements.courseName.value = normalizeTextValue(printSettings.courseName, "");
+  elements.examDate.value = normalizeTextValue(printSettings.examDate, "");
+  elements.startTime.value = normalizeTextValue(printSettings.startTime, "");
+  elements.totalTimeMinutes.value = String(printSettings.totalTimeMinutes ?? "").trim();
+  elements.instructor.value = normalizeTextValue(printSettings.instructor, "");
+  elements.allowedMaterials.value = normalizeTextValue(printSettings.allowedMaterials, "");
+  elements.omrInstructions.value = normalizeTextValue(printSettings.omrInstructions, DEFAULT_OMR_INSTRUCTIONS);
+  elements.examRules.value = normalizeExamRules(printSettings.examRules).join("\n");
+  renderExamRulesPreview();
+}
+
+function setPrintSettingsFormDisabled(disabled) {
+  for (const element of printSettingsElements) {
+    element.disabled = disabled;
+  }
 }
 
 function assetUrl(assetId) {
@@ -326,13 +505,17 @@ function renderSectionToggles() {
 function renderSelectedExamSet() {
   const hasExamSet = Boolean(state.selectedExamSet);
   elements.results.classList.toggle("hidden", !hasExamSet);
-  elements.printResults.disabled = !hasExamSet || state.isDownloadingPrintableZip || state.isDeletingExamSet;
-  elements.deleteExam.disabled = !hasExamSet || state.isDownloadingPrintableZip || state.isDeletingExamSet;
+  const isBusy = state.isDownloadingPrintableZip || state.isDeletingExamSet || state.isUpdatingPrintSettings;
+  elements.printResults.disabled = !hasExamSet || isBusy;
+  elements.deleteExam.disabled = !hasExamSet || isBusy;
+  elements.updatePrintSettings.disabled = !hasExamSet || isBusy;
+  setPrintSettingsFormDisabled(!hasExamSet || isBusy);
   if (!hasExamSet) {
     elements.viewerQuestionPoolBody.replaceChildren();
     elements.variantMenu.replaceChildren();
     elements.variantSelect.replaceChildren();
     elements.variantList.replaceChildren();
+    populatePrintSettingsForm();
     renderSectionToggles();
     return;
   }
@@ -355,6 +538,10 @@ function renderSelectedExamSet() {
 
 async function downloadPrintableZip() {
   if (!state.selectedExamSet) {
+    return;
+  }
+  if (printSettingsHaveUnsavedChanges()) {
+    setStatus("Printable metadata has unsaved changes. Apply Metadata Updates before downloading printables.", true);
     return;
   }
 
@@ -388,6 +575,52 @@ async function downloadPrintableZip() {
   state.isDownloadingPrintableZip = false;
   renderSelectedExamSet();
   setStatus(`Downloaded printable ZIP for exam set ${examSetId}.`);
+}
+
+async function updateSelectedPrintSettings() {
+  if (!state.selectedExamSet) {
+    return;
+  }
+
+  const examSetId = state.selectedExamSet.examSet.examSetId;
+  state.isUpdatingPrintSettings = true;
+  renderSelectedExamSet();
+  setStatus("Updating printable metadata...");
+
+  try {
+    const response = await fetch(`/api/exams/set/${encodeURIComponent(examSetId)}/print-settings`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(printableMetadata()),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      state.validationErrors = payload.errors ?? [{ path: "<metadata>", message: "Could not update printable metadata" }];
+      renderErrors();
+      setStatus("Metadata update failed. Review the validation messages.", true);
+      return;
+    }
+
+    state.selectedExamSet.summary = payload.summary;
+    state.selectedExamSet.examSet.printSettings = payload.printSettings;
+    state.examSets = state.examSets.map((summary) => (
+      summary.examSetId === examSetId ? payload.summary : summary
+    ));
+    state.validationErrors = [];
+    renderErrors();
+    populatePrintSettingsForm(payload.printSettings);
+    renderExamSetOptions();
+    renderExamSetList();
+    renderSelectedExamSet();
+    setStatus(`Updated printable metadata for exam set ${examSetId}.`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    state.isUpdatingPrintSettings = false;
+    renderSelectedExamSet();
+  }
 }
 
 async function deleteSelectedExamSet() {
@@ -484,6 +717,7 @@ async function loadExamSet(examSetId) {
   state.selectedVariantId = payload.examSet.variants[0]?.variantId ?? "";
   state.validationErrors = [];
   renderErrors();
+  populatePrintSettingsForm(payload.examSet.printSettings);
   renderSelectedExamSet();
   setStatus(`Loaded exam set ${examSetId}.`);
 }
@@ -505,6 +739,31 @@ function wireEvents() {
   });
   elements.printResults.addEventListener("click", () => {
     void downloadPrintableZip();
+  });
+  elements.updatePrintSettings.addEventListener("click", () => {
+    void updateSelectedPrintSettings();
+  });
+  for (const element of printSettingsElements) {
+    element.addEventListener("input", () => {
+      if (element === elements.examRules) {
+        renderExamRulesPreview();
+      }
+      if (state.selectedExamSet) {
+        setStatus("Printable metadata changed. Apply updates before downloading printables.");
+      }
+    });
+  }
+  elements.omrInstructions.addEventListener("input", () => {
+    const currentRules = parseExamRules(elements.examRules.value);
+    const omrInstructions = elements.omrInstructions.value.trim() || DEFAULT_OMR_INSTRUCTIONS;
+    if (
+      currentRules.length === 0
+      || JSON.stringify(currentRules) === JSON.stringify(defaultExamRules())
+      || JSON.stringify(currentRules) === JSON.stringify(defaultExamRules(currentRules[0] || DEFAULT_OMR_INSTRUCTIONS))
+    ) {
+      elements.examRules.value = defaultExamRules(omrInstructions).join("\n");
+      renderExamRulesPreview();
+    }
   });
   elements.variantSelect.addEventListener("change", (event) => {
     state.selectedVariantId = event.target.value;

@@ -100,6 +100,62 @@
             <section class="panel">
               <div class="panel__head">
                 <div>
+                  <p class="eyebrow">Print Settings</p>
+                  <h2>Printable Metadata</h2>
+                </div>
+                <div class="panel__actions">
+                  <button id="viewer-update-print-settings" class="button button--primary" type="button" disabled>Apply Metadata Updates</button>
+                </div>
+              </div>
+              <div class="field-grid">
+                <label class="field field--full">
+                  <span>Institution Name</span>
+                  <input id="viewer-institution-name" type="text" />
+                </label>
+                <label class="field field--full">
+                  <span>Exam Name</span>
+                  <input id="viewer-print-exam-name" type="text" />
+                </label>
+                <label class="field">
+                  <span>Course Name</span>
+                  <input id="viewer-course-name" type="text" />
+                </label>
+                <label class="field">
+                  <span>Exam Date</span>
+                  <input id="viewer-exam-date" type="date" />
+                </label>
+                <label class="field">
+                  <span>Start Time</span>
+                  <input id="viewer-start-time" type="time" />
+                </label>
+                <label class="field">
+                  <span>Total Time (Minutes)</span>
+                  <input id="viewer-total-time-minutes" type="number" min="1" step="1" />
+                </label>
+                <label class="field">
+                  <span>Instructor</span>
+                  <input id="viewer-instructor" type="text" />
+                </label>
+                <label class="field">
+                  <span>Materials</span>
+                  <input id="viewer-allowed-materials" type="text" />
+                </label>
+                <label class="field field--full">
+                  <span>OMR Instructions</span>
+                  <textarea id="viewer-omr-instructions" rows="3"></textarea>
+                </label>
+                <label class="field field--full">
+                  <span>Exam Rules</span>
+                  <textarea id="viewer-exam-rules" rows="6" placeholder="One rule per line"></textarea>
+                  <p class="helper-copy field__hint">Use <code>[math]...[/math]</code> for inline LaTeX in first-page instructions, for example <code>[math]A = \pi r^{2}[/math]</code>.</p>
+                  <div id="viewer-exam-rules-preview" class="rich-preview exam-rules-preview hidden" aria-live="polite"></div>
+                </label>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel__head">
+                <div>
                   <p class="eyebrow">Question Pool</p>
                   <h2>Shared Source Questions</h2>
                 </div>

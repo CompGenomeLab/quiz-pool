@@ -440,6 +440,19 @@ def find_project_exam_set(path: Path, exam_set_id: str) -> dict[str, Any] | None
     return payload if isinstance(payload, dict) else None
 
 
+def update_project_exam_set_print_settings(
+    path: Path,
+    exam_set_id: str,
+    print_settings: dict[str, Any],
+) -> dict[str, Any] | None:
+    exam_set = find_project_exam_set(path, exam_set_id)
+    if exam_set is None:
+        return None
+    exam_set["printSettings"] = print_settings
+    upsert_project_exam_set(path, exam_set)
+    return exam_set
+
+
 def load_project_generator_draft(path: Path) -> dict[str, Any] | None:
     initialize_project_db(path)
     with connect_project(path) as connection:
@@ -842,6 +855,18 @@ def load_active_exam_store(state: AppState) -> dict[str, Any]:
 
 def append_active_exam_set(state: AppState, exam_set: dict[str, Any]) -> None:
     upsert_project_exam_set(state.project_path, exam_set)
+
+
+def update_active_exam_set_print_settings(
+    state: AppState,
+    exam_set_id: str,
+    print_settings: dict[str, Any],
+) -> dict[str, Any] | None:
+    return update_project_exam_set_print_settings(
+        state.project_path,
+        exam_set_id,
+        print_settings,
+    )
 
 
 def delete_active_exam_set(state: AppState, exam_set_id: str) -> bool:
@@ -1691,6 +1716,30 @@ def normalize_generation_request(
         },
         [],
     )
+
+
+def normalize_print_settings_payload(
+    payload: Any,
+) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    if not isinstance(payload, dict):
+        return None, [{"path": "<body>", "message": "Print settings payload must be a JSON object"}]
+
+    errors: list[dict[str, str]] = []
+    print_settings = {
+        "institutionName": normalize_optional_string(payload, "institutionName", errors),
+        "examName": normalize_optional_string(payload, "examName", errors),
+        "courseName": normalize_optional_string(payload, "courseName", errors),
+        "examDate": normalize_optional_string(payload, "examDate", errors),
+        "startTime": normalize_optional_string(payload, "startTime", errors),
+        "totalTimeMinutes": normalize_optional_positive_int(payload, "totalTimeMinutes", errors),
+        "instructor": normalize_optional_string(payload, "instructor", errors),
+        "allowedMaterials": normalize_optional_string(payload, "allowedMaterials", errors),
+        "omrInstructions": normalize_optional_string(payload, "omrInstructions", errors),
+        "examRules": normalize_rule_list(payload, "examRules", errors),
+    }
+    if errors:
+        return None, errors
+    return print_settings, []
 
 
 def normalize_grading_request(payload: Any) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
@@ -3495,7 +3544,7 @@ def render_student_cover_page(
 ) -> str:
     print_settings = get_print_settings(exam_set)
     rules_markup = "".join(
-        f"<li>{html.escape(rule)}</li>" for rule in print_settings["examRules"]
+        f"<li data-rich-text>{html.escape(rule)}</li>" for rule in print_settings["examRules"]
     )
     student_info = "".join(
         [
@@ -3973,6 +4022,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/generator-draft":
                 self.handle_put_generator_draft()
                 return
+            if parsed.path.startswith("/api/exams/set/") and parsed.path.endswith("/print-settings"):
+                self.handle_update_exam_set_print_settings(parsed.path)
+                return
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
         def do_POST(self) -> None:  # noqa: N802
@@ -4379,6 +4431,55 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             self.send_json({"ok": True, "examSetId": exam_set_id})
+
+        def handle_update_exam_set_print_settings(self, path: str) -> None:
+            suffix = "/print-settings"
+            exam_set_id = unquote(path.removeprefix("/api/exams/set/").removesuffix(suffix)).strip()
+            if not exam_set_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Exam set not found")
+                return
+
+            payload, body_errors = self.read_json_body()
+            if body_errors:
+                self.send_json({"ok": False, "errors": body_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            print_settings, settings_errors = normalize_print_settings_payload(payload)
+            if settings_errors or print_settings is None:
+                self.send_json({"ok": False, "errors": settings_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            try:
+                exam_set = update_active_exam_set_print_settings(
+                    state,
+                    exam_set_id,
+                    print_settings,
+                )
+            except ValueError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<store>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+            except OSError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<store>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            if exam_set is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "Exam set not found")
+                return
+
+            self.send_json(
+                {
+                    "ok": True,
+                    "examSetId": exam_set_id,
+                    "summary": build_exam_set_summary(exam_set),
+                    "printSettings": get_print_settings(exam_set),
+                }
+            )
 
         def handle_get_variant(self, path: str) -> None:
             variant_id = unquote(path.removeprefix("/api/exams/variant/")).strip()

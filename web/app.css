@@ -756,6 +756,19 @@ textarea {
   padding: 0.9rem 1rem;
 }
 
+.exam-rules-preview {
+  margin-top: 4px;
+}
+
+.exam-rules-preview ol {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.exam-rules-preview li + li {
+  margin-top: 0.45rem;
+}
+
 .question-image-upload {
   cursor: pointer;
   margin-top: 12px;
