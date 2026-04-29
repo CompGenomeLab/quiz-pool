@@ -42,19 +42,29 @@ import segno
 PACKAGE_ROOT = Path(__file__).resolve().parent
 SRC_ROOT = PACKAGE_ROOT.parent
 ROOT = SRC_ROOT.parent
-WEB_ROOT = ROOT / "web"
-DEFAULT_DB = ROOT / "sample_quiz.json"
+
+
+def resolve_packaged_or_source_path(name: str) -> Path:
+    packaged_path = PACKAGE_ROOT / name
+    if packaged_path.exists():
+        return packaged_path
+    return ROOT / name
+
+
+WEB_ROOT = resolve_packaged_or_source_path("web")
+DEFAULT_DB = resolve_packaged_or_source_path("sample_quiz.json")
 INTERNAL_SCHEMA_PATH = PACKAGE_ROOT / "schemas" / "scheme.json"
 DEFAULT_PROJECT_SUFFIX = ".quizpool"
 PROJECT_SCHEMA_VERSION = "1"
 DISPLAY_KEYS = ("A", "B", "C", "D", "E")
 DEFAULT_PRINTABLE_FOLDER = "exam-printables"
 QUESTION_POOL_PRINTABLE_NAME = "question-pool.pdf"
-LATEX_STUDENT_TEMPLATE = ROOT / "tex_templates" / "exam_template.tex"
-LATEX_QUESTION_POOL_TEMPLATE = ROOT / "tex_templates" / "pool_template.tex"
+LATEX_TEMPLATE_ROOT = resolve_packaged_or_source_path("tex_templates")
+LATEX_STUDENT_TEMPLATE = LATEX_TEMPLATE_ROOT / "exam_template.tex"
+LATEX_QUESTION_POOL_TEMPLATE = LATEX_TEMPLATE_ROOT / "pool_template.tex"
 LATEX_ENGINE = "lualatex"
 LATEX_VARIANT_QR_ASSET_NAME = "variant-qr.pdf"
-LATEX_FONT_ROOT = ROOT / "tex_templates" / "fonts"
+LATEX_FONT_ROOT = LATEX_TEMPLATE_ROOT / "fonts"
 LATEX_FONT_ASSET_PATHS = {
     "lmroman10-regular.otf": LATEX_FONT_ROOT / "lm" / "lmroman10-regular.otf",
     "lmroman10-bold.otf": LATEX_FONT_ROOT / "lm" / "lmroman10-bold.otf",
@@ -229,6 +239,13 @@ def default_project_path_for(db_path: Path) -> Path:
     return db_path.with_suffix(DEFAULT_PROJECT_SUFFIX).resolve()
 
 
+def default_cli_project_path() -> Path:
+    source_default_db = ROOT / "sample_quiz.json"
+    if source_default_db.is_file():
+        return default_project_path_for(source_default_db)
+    return (Path.cwd() / f"sample_quiz{DEFAULT_PROJECT_SUFFIX}").resolve()
+
+
 def empty_quiz_document() -> dict[str, Any]:
     return {
         "title": "Untitled Quiz Pool",
@@ -239,7 +256,11 @@ def empty_quiz_document() -> dict[str, Any]:
 
 
 def display_default_project_path() -> str:
-    return str(default_project_path_for(DEFAULT_DB).relative_to(ROOT))
+    default_path = default_cli_project_path()
+    try:
+        return str(default_path.relative_to(ROOT))
+    except ValueError:
+        return str(default_path)
 
 
 def load_json(path: Path) -> Any:
@@ -5602,7 +5623,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project",
         type=Path,
-        default=default_project_path_for(DEFAULT_DB),
+        default=default_cli_project_path(),
         help="Path to the unified Quiz Pool project database (.quizpool)",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind")

@@ -42,6 +42,17 @@ Additional notes:
 
 ## Run
 
+Run directly from GitHub without cloning the repository:
+
+```bash
+uvx --from git+https://github.com/CompGenomeLab/quiz-pool.git \
+  quiz_pool --project path/to/course.quizpool
+```
+
+The same system tools listed above are still required for PDF export, grading, and annotation.
+
+Run from a local clone:
+
 ```bash
 uv run quiz_pool --project sample_quiz.quizpool
 ```
