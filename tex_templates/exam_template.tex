@@ -15,7 +15,6 @@
 \usepackage{graphicx}
 \usepackage{tabularx}
 \usepackage{multicol}
-\IfFileExists{needspace.sty}{\usepackage{needspace}}{\providecommand{\Needspace}[1]{}}
 
 \definecolor{PrismBlue}{HTML}{173B63}
 \definecolor{PrismGray}{HTML}{F4F6F8}
@@ -67,16 +66,15 @@
 }
 
 \newcommand{\mcqitem}[2]{%
-  \Needspace{7\baselineskip}%
   \item\relax
-  \begin{minipage}[t]{\linewidth}
-    #1\par
-    \vspace{0.3em}
+  \begingroup
+    #1\par\nopagebreak[2]
+    \vspace{0.3em}\nopagebreak[2]
     {\footnotesize\renewcommand{\arraystretch}{1.1}%
     \begin{tabularx}{\linewidth}{@{}>{\bfseries}lX@{}}
       #2
     \end{tabularx}}
-  \end{minipage}
+  \endgroup
 }
 
 \setlength{\headheight}{14pt}

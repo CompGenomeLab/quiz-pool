@@ -165,6 +165,13 @@ class LatexExportTests(unittest.TestCase):
         self.assertIn(r"\usepackage[a4paper,margin=1in]{geometry}", student_document)
         self.assertIn(r"\usepackage[a4paper,margin=1in]{geometry}", question_pool_document)
 
+    def test_student_latex_layout_does_not_depend_on_needspace(self) -> None:
+        student_document = build_student_latex_document(sample_exam_set(), sample_variant())
+
+        self.assertNotIn("needspace.sty", student_document)
+        self.assertNotIn(r"\Needspace", student_document)
+        self.assertNotIn(r"\begin{minipage}[t]{\linewidth}", student_document)
+
     def test_build_latex_font_assets_includes_vendored_fonts(self) -> None:
         assets = build_latex_font_assets()
         self.assertIn("lmroman10-regular.otf", assets)
