@@ -25,6 +25,19 @@
         </div>
       </section>
     </div>
+    <div id="grading-detail-modal" class="detail-modal grading-detail-modal" aria-hidden="true">
+      <div id="grading-detail-backdrop" class="detail-modal__backdrop"></div>
+      <section class="detail-modal__panel grading-detail-modal__panel" role="dialog" aria-modal="true" aria-labelledby="grading-detail-modal-title">
+        <div class="grading-detail-modal__top">
+          <div>
+            <p class="eyebrow">Detail</p>
+            <h2 id="grading-detail-modal-title">Question-Level Review</h2>
+          </div>
+          <button id="close-grading-detail" class="button button--ghost" type="button">Close</button>
+        </div>
+        <div id="grading-detail-list" class="grading-detail-list"></div>
+      </section>
+    </div>
     <div id="grading-busy-overlay" class="busy-overlay hidden" aria-live="polite" aria-busy="true">
       <div class="busy-overlay__card">
         <div class="busy-overlay__spinner" aria-hidden="true"></div>
@@ -131,6 +144,7 @@
                 </div>
                 <div class="panel__actions">
                   <button id="annotate-graded-pdfs" class="button button--ghost" type="button" disabled>OMR Annotate</button>
+                  <button id="delete-grading-run" class="button button--danger" type="button" disabled>Delete Run</button>
                 </div>
               </div>
               <div class="result-summary">
@@ -228,22 +242,12 @@
                       <th>Objectives</th>
                       <th>Formula</th>
                       <th>Status</th>
+                      <th>Detail</th>
                     </tr>
                   </thead>
                   <tbody id="grading-table-body"></tbody>
                 </table>
               </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel__head">
-                <div>
-                  <p class="eyebrow">Detail</p>
-                  <h2>Question-Level Review</h2>
-                  <p class="helper-copy">Click a student row above to inspect the question-level review.</p>
-                </div>
-              </div>
-              <div id="grading-detail-list" class="grading-detail-list"></div>
             </section>
           </section>
         </main>

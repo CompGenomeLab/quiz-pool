@@ -316,6 +316,39 @@ textarea {
   width: min(640px, calc(100vw - 48px));
 }
 
+.grading-detail-modal__panel {
+  border-radius: 22px;
+  bottom: 24px;
+  left: auto;
+  max-height: none;
+  max-width: min(1180px, calc(100vw - 48px));
+  right: 24px;
+  top: 24px;
+  transform: translateX(26px);
+  width: min(1180px, calc(100vw - 48px));
+}
+
+.grading-detail-modal__top {
+  align-items: start;
+  border-bottom: 1px solid rgba(23, 33, 43, 0.1);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding-bottom: 14px;
+}
+
+.grading-detail-modal__top h2 {
+  font-family: "Rockwell", "Georgia", serif;
+  margin: 0;
+}
+
+.grading-detail-modal .grading-detail-card {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
 .detail-modal.is-open {
   pointer-events: auto;
 }
@@ -327,6 +360,10 @@ textarea {
 .detail-modal.is-open .detail-modal__panel {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
+}
+
+.detail-modal.is-open .grading-detail-modal__panel {
+  transform: translateX(0);
 }
 
 .question-detail-sheet {
@@ -923,6 +960,10 @@ textarea {
   background: rgba(20, 108, 89, 0.1);
 }
 
+.grading-detail-button {
+  min-width: 72px;
+}
+
 .grading-detail-list {
   display: flex;
   flex-direction: column;
@@ -986,6 +1027,136 @@ textarea {
 
 .objective-report-table {
   min-width: 860px;
+}
+
+.objective-chip-list {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 260px;
+}
+
+.objective-chip-list--compact {
+  align-items: center;
+  gap: 5px;
+  min-width: 210px;
+}
+
+.objective-chip-list__empty {
+  color: var(--muted);
+}
+
+.objective-chip {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(23, 33, 43, 0.12);
+  border-radius: 12px;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+}
+
+.objective-chip__name {
+  color: var(--ink);
+  font-family: "Courier New", monospace;
+  font-size: 0.78rem;
+  padding: 0 3px;
+}
+
+.objective-chip__metric,
+.score-pill {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 4px;
+  line-height: 1;
+  min-height: 24px;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.objective-chip__metric-label {
+  font-size: 0.7rem;
+  opacity: 0.76;
+  text-transform: uppercase;
+}
+
+.objective-chip__metric--score,
+.score-pill--score {
+  background: rgba(49, 93, 138, 0.12);
+  color: #315d8a;
+}
+
+.objective-chip__metric--correct,
+.score-pill--correct {
+  background: rgba(20, 108, 89, 0.14);
+  color: #0f4d40;
+}
+
+.objective-chip__metric--wrong,
+.score-pill--wrong {
+  background: rgba(178, 65, 43, 0.12);
+  color: var(--danger-strong);
+}
+
+.objective-chip__metric--blank,
+.score-pill--blank {
+  background: rgba(180, 122, 0, 0.16);
+  color: #8a5d00;
+}
+
+.objective-compact-chip {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(23, 33, 43, 0.1);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 3px;
+  max-width: 100%;
+  padding: 3px 4px;
+}
+
+.objective-compact-chip__name {
+  color: var(--ink);
+  font-family: "Courier New", monospace;
+  font-size: 0.74rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.objective-compact-chip__score,
+.objective-compact-chip__metric {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+
+.objective-compact-chip__score {
+  background: rgba(49, 93, 138, 0.12);
+  color: #315d8a;
+}
+
+.objective-compact-chip__metric--correct {
+  background: rgba(20, 108, 89, 0.14);
+  color: #0f4d40;
+}
+
+.objective-compact-chip__metric--wrong {
+  background: rgba(178, 65, 43, 0.12);
+  color: var(--danger-strong);
+}
+
+.objective-compact-chip__metric--blank {
+  background: rgba(180, 122, 0, 0.16);
+  color: #8a5d00;
 }
 
 .inline-select {
@@ -1664,6 +1835,20 @@ textarea {
 
   .masthead {
     align-items: start;
+    flex-direction: column;
+  }
+
+  .grading-detail-modal__panel {
+    bottom: 12px;
+    left: 12px;
+    max-width: none;
+    right: 12px;
+    top: 12px;
+    width: auto;
+  }
+
+  .grading-detail-modal__top {
+    align-items: stretch;
     flex-direction: column;
   }
 

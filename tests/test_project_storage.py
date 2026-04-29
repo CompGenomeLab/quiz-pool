@@ -9,6 +9,7 @@ from src.quiz_pool.main import (
     AppState,
     UploadedFile,
     clear_grading_uploads,
+    delete_project_grading_run,
     grading_upload_label,
     import_quiz_json_content_into_project,
     import_quiz_json_into_project,
@@ -176,6 +177,9 @@ class ProjectStorageTests(unittest.TestCase):
                 {"mode": "fixed", "wrongPenalty": 0.5},
             )
             reloaded = find_project_grading_run(project_path, "grading-001")
+            deleted = delete_project_grading_run(project_path, "grading-001")
+            after_delete = find_project_grading_run(project_path, "grading-001")
+            missing_deleted = delete_project_grading_run(project_path, "grading-001")
 
             self.assertEqual(stored["report"]["total"]["earnedPoints"], 0)
             self.assertEqual(len(summaries), 1)
@@ -183,6 +187,9 @@ class ProjectStorageTests(unittest.TestCase):
             self.assertIsNotNone(updated)
             self.assertEqual(reloaded["gradingFormula"]["mode"], "fixed")
             self.assertEqual(reloaded["report"]["total"]["earnedPoints"], -0.5)
+            self.assertTrue(deleted)
+            self.assertIsNone(after_delete)
+            self.assertFalse(missing_deleted)
 
     def test_system_file_dialog_allows_expected_selection_types(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

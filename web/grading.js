@@ -9,6 +9,7 @@ const state = {
   gradingFiles: [],
   annotateModalOpen: false,
   isAnnotating: false,
+  isDeletingGradingRun: false,
   isGrading: false,
   results: null,
   savedRuns: [],
@@ -17,6 +18,7 @@ const state = {
     mode: "none",
     wrongPenalty: 0,
   },
+  detailModalOpen: false,
   correctSortDirection: "desc",
   selectedRowIndex: null,
   statusIsError: false,
@@ -32,7 +34,9 @@ const elements = {
   browseGradingFolder: document.querySelector("#browse-grading-folder"),
   cancelAnnotateModal: document.querySelector("#cancel-annotate-modal"),
   confirmAnnotateModal: document.querySelector("#confirm-annotate-modal"),
+  closeGradingDetail: document.querySelector("#close-grading-detail"),
   dbPath: document.querySelector("#db-path"),
+  deleteGradingRun: document.querySelector("#delete-grading-run"),
   errorList: document.querySelector("#grading-error-list"),
   exportGradingCsv: document.querySelector("#export-grading-csv"),
   errorPanel: document.querySelector("#grading-errors"),
@@ -51,6 +55,8 @@ const elements = {
   gradingStatus: document.querySelector("#grading-status"),
   gradingTableBody: document.querySelector("#grading-table-body"),
   gradingDetailList: document.querySelector("#grading-detail-list"),
+  gradingDetailModal: document.querySelector("#grading-detail-modal"),
+  gradingDetailBackdrop: document.querySelector("#grading-detail-backdrop"),
   gradingFormulaMode: document.querySelector("#grading-formula-mode"),
   gradingFixedPenalty: document.querySelector("#grading-fixed-penalty"),
   gradingFixedPenaltyField: document.querySelector("#grading-fixed-penalty-field"),
@@ -112,6 +118,29 @@ function openAnnotateModal() {
 function closeAnnotateModal() {
   state.annotateModalOpen = false;
   renderAnnotateModal();
+}
+
+function renderGradingDetailModal() {
+  const isOpen = state.detailModalOpen && Boolean(state.results);
+  elements.gradingDetailModal.classList.toggle("is-open", isOpen);
+  elements.gradingDetailModal.setAttribute("aria-hidden", String(!isOpen));
+}
+
+function openGradingDetail(rowIndex) {
+  if (!state.results) {
+    return;
+  }
+  state.selectedRowIndex = rowIndex;
+  state.detailModalOpen = true;
+  renderSummary();
+  window.setTimeout(() => {
+    elements.closeGradingDetail.focus();
+  }, 0);
+}
+
+function closeGradingDetail() {
+  state.detailModalOpen = false;
+  renderGradingDetailModal();
 }
 
 function escapeHtml(value) {
@@ -233,6 +262,117 @@ function objectiveSummaryText(items = []) {
   }).join(" | ");
 }
 
+function objectiveBlankMissingCount(item = {}) {
+  return Number(item.blankCount ?? 0) + Number(item.missingCount ?? 0);
+}
+
+function createObjectiveMetric(label, value, tone) {
+  const metric = document.createElement("span");
+  metric.className = `objective-chip__metric objective-chip__metric--${tone}`;
+
+  const metricLabel = document.createElement("span");
+  metricLabel.className = "objective-chip__metric-label";
+  metricLabel.textContent = label;
+
+  const metricValue = document.createElement("strong");
+  metricValue.textContent = value;
+
+  metric.append(metricLabel, metricValue);
+  return metric;
+}
+
+function createObjectiveSummaryNode(items = []) {
+  const wrap = document.createElement("div");
+  wrap.className = "objective-chip-list";
+  if (!Array.isArray(items) || items.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "objective-chip-list__empty";
+    empty.textContent = "—";
+    wrap.append(empty);
+    return wrap;
+  }
+
+  for (const item of items) {
+    const chip = document.createElement("span");
+    chip.className = "objective-chip";
+
+    const name = document.createElement("strong");
+    name.className = "objective-chip__name";
+    name.textContent = item.id || "Objective";
+
+    const score = createObjectiveMetric(
+      "Score",
+      `${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)}`,
+      "score",
+    );
+    const correct = createObjectiveMetric("C", String(item.correctCount ?? 0), "correct");
+    const wrong = createObjectiveMetric("W", String(item.wrongCount ?? 0), "wrong");
+    chip.append(name, score, correct, wrong);
+
+    const blankMissing = objectiveBlankMissingCount(item);
+    if (blankMissing > 0) {
+      chip.append(createObjectiveMetric("B/M", String(blankMissing), "blank"));
+    }
+
+    wrap.append(chip);
+  }
+  return wrap;
+}
+
+function createCompactObjectiveSummaryNode(items = []) {
+  const wrap = document.createElement("div");
+  wrap.className = "objective-chip-list objective-chip-list--compact";
+  if (!Array.isArray(items) || items.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "objective-chip-list__empty";
+    empty.textContent = "—";
+    wrap.append(empty);
+    return wrap;
+  }
+
+  for (const item of items) {
+    const chip = document.createElement("span");
+    chip.className = "objective-compact-chip";
+    chip.title = `${item.id || "Objective"}: ${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)}; C${item.correctCount ?? 0}; W${item.wrongCount ?? 0}; B/M${objectiveBlankMissingCount(item)}`;
+
+    const name = document.createElement("strong");
+    name.className = "objective-compact-chip__name";
+    name.textContent = item.id || "Obj";
+
+    const score = document.createElement("span");
+    score.className = "objective-compact-chip__score";
+    score.textContent = `${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)}`;
+
+    const correct = document.createElement("span");
+    correct.className = "objective-compact-chip__metric objective-compact-chip__metric--correct";
+    correct.textContent = `C${item.correctCount ?? 0}`;
+
+    const wrong = document.createElement("span");
+    wrong.className = "objective-compact-chip__metric objective-compact-chip__metric--wrong";
+    wrong.textContent = `W${item.wrongCount ?? 0}`;
+
+    chip.append(name, score, correct, wrong);
+
+    const blankMissing = objectiveBlankMissingCount(item);
+    if (blankMissing > 0) {
+      const blank = document.createElement("span");
+      blank.className = "objective-compact-chip__metric objective-compact-chip__metric--blank";
+      blank.textContent = `B${blankMissing}`;
+      chip.append(blank);
+    }
+
+    wrap.append(chip);
+  }
+  return wrap;
+}
+
+function createScorePill(value, tone) {
+  const pill = document.createElement("span");
+  pill.className = `score-pill score-pill--${tone}`;
+  pill.textContent = value;
+  return pill;
+}
+
 function sourcePdfUrl(row) {
   if (!state.results?.gradingRunId || !row.rowIndex) {
     return "";
@@ -242,10 +382,18 @@ function sourcePdfUrl(row) {
 
 function csvCell(value) {
   const normalized = String(value ?? "");
-  if (normalized.includes('"') || normalized.includes(",") || normalized.includes("\n")) {
+  if (normalized.includes('"') || normalized.includes(",") || normalized.includes("\n") || normalized.includes("\r")) {
     return `"${normalized.replaceAll('"', '""')}"`;
   }
   return normalized;
+}
+
+function scoreText(earnedPoints, possiblePoints) {
+  return `${formatScore(earnedPoints)}/${formatScore(possiblePoints)}`;
+}
+
+function countText(...values) {
+  return String(values.reduce((total, value) => total + Number(value ?? 0), 0));
 }
 
 function getSortedRows(rows) {
@@ -373,79 +521,112 @@ function downloadGradingCsv() {
   const rows = getSortedRows(state.results.rows);
   const reportTotal = state.results.report?.total ?? {};
   const formulaDescription = gradingFormulaDescription(state.results.gradingFormula);
-  const lines = [
-    ["Run Summary"].map(csvCell).join(","),
-    ["Grading Run ID", state.results.gradingRunId || ""].map(csvCell).join(","),
-    ["Graded At", state.results.gradedAt || ""].map(csvCell).join(","),
-    ["Input", state.results.inputPath || ""].map(csvCell).join(","),
-    ["Formula", formulaDescription].map(csvCell).join(","),
-    ["Processed PDFs", state.results.summary.processedCount].map(csvCell).join(","),
-    ["Total Score", `${formatScore(reportTotal.earnedPoints)}/${formatScore(reportTotal.possiblePoints)}`].map(csvCell).join(","),
-    ["Total Correct", reportTotal.correctCount ?? 0].map(csvCell).join(","),
-    ["Total Wrong", reportTotal.wrongCount ?? 0].map(csvCell).join(","),
-    "",
-    ["Learning Objective Summary"].map(csvCell).join(","),
-    [
-      "Objective",
-      "Questions",
-      "Score",
-      "Correct",
-      "Wrong",
-      "Blank / Missing",
-    ].map(csvCell).join(","),
-    ...((state.results.report?.learningObjectives ?? []).map((objective) => [
-      `${objective.id} · ${objective.label}`,
-      String(objective.questionCount ?? 0),
-      `${formatScore(objective.earnedPoints)}/${formatScore(objective.possiblePoints)}`,
-      String(objective.correctCount ?? 0),
-      String(objective.wrongCount ?? 0),
-      String((objective.blankCount ?? 0) + (objective.missingCount ?? 0)),
-    ].map(csvCell).join(","))),
-    "",
-    ["Student Rows"].map(csvCell).join(","),
-    [
-      "Row",
-      "Student ID",
-      "Source PDF",
-      "Exam Set",
-      "Variant",
-      "Questions",
-      "Score",
-      "Correct",
-      "Wrong",
-      "Blank",
-      "Invalid",
-      "Penalty",
-      "Formula",
-      "Learning Objectives",
-      "Status",
-    ].map(csvCell).join(","),
+  const objectiveColumns = (state.results.report?.learningObjectives ?? []).map((objective, index) => {
+    const id = String(objective.id || `Objective ${index + 1}`).trim();
+    return {
+      id,
+      label: String(objective.label || "").trim(),
+      report: objective,
+    };
+  });
+  const objectiveHeaders = objectiveColumns.flatMap((objective) => [
+    `${objective.id} Label`,
+    `${objective.id} Run Questions`,
+    `${objective.id} Run Score`,
+    `${objective.id} Score`,
+    `${objective.id} Correct`,
+    `${objective.id} Wrong`,
+    `${objective.id} Blank / Missing`,
+  ]);
+  const header = [
+    "Grading Run ID",
+    "Graded At",
+    "Input",
+    "Formula",
+    "Run Processed PDFs",
+    "Run Total Score",
+    "Run Total Correct",
+    "Run Total Wrong",
+    "Row",
+    "Student ID",
+    "Source PDF",
+    "Exam Set",
+    "Variant",
+    "Detected Questions",
+    "Variant Questions",
+    "Score",
+    "Earned Points",
+    "Possible Points",
+    "Correct",
+    "Wrong",
+    "Blank",
+    "Missing",
+    "Blank / Missing",
+    "Invalid",
+    "Penalty",
+    "Status",
+    "Issues",
+    "Learning Objectives",
+    ...objectiveHeaders,
   ];
+  const lines = [header.map(csvCell).join(",")];
 
-  for (const row of rows) {
-    const questionCount = row.variantQuestionCount
-      ? `${row.detectedQuestionCount}/${row.variantQuestionCount}`
-      : String(row.detectedQuestionCount);
+  for (const row of (rows.length > 0 ? rows : [null])) {
+    const summary = row?.summary ?? {};
+    const rowObjectives = new Map();
+    for (const objective of row?.learningObjectiveSummary ?? []) {
+      if (objective?.id) {
+        rowObjectives.set(String(objective.id), objective);
+      }
+    }
+    const objectiveValues = objectiveColumns.flatMap((objective) => {
+      const item = rowObjectives.get(objective.id);
+      return [
+        objective.label,
+        String(objective.report.questionCount ?? ""),
+        scoreText(objective.report.earnedPoints, objective.report.possiblePoints),
+        item ? scoreText(item.earnedPoints, item.possiblePoints) : "",
+        item ? String(item.correctCount ?? 0) : "",
+        item ? String(item.wrongCount ?? 0) : "",
+        item ? String(objectiveBlankMissingCount(item)) : "",
+      ];
+    });
     lines.push([
-      String(row.rowIndex ?? ""),
-      row.displayStudentId,
-      row.sourcePdf || "—",
-      row.examSetId || "—",
-      row.variantId || "—",
-      questionCount,
-      `${formatScore(row.summary.earnedPoints)}/${formatScore(row.summary.possiblePoints)}`,
-      String(row.summary.correctCount),
-      String(row.summary.wrongCount ?? row.summary.incorrectCount ?? 0),
-      String(row.summary.blankCount + row.summary.missingCount),
-      String(row.summary.invalidCount ?? 0),
-      formatScore(row.summary.penaltyPoints),
-      gradingFormulaDescription(row.gradingFormula ?? state.results.gradingFormula),
-      objectiveSummaryText(row.learningObjectiveSummary),
-      statusLabel(row),
+      state.results.gradingRunId || "",
+      state.results.gradedAt || "",
+      state.results.inputPath || "",
+      formulaDescription,
+      String(state.results.summary?.processedCount ?? ""),
+      scoreText(reportTotal.earnedPoints, reportTotal.possiblePoints),
+      String(reportTotal.correctCount ?? 0),
+      String(reportTotal.wrongCount ?? 0),
+      String(row?.rowIndex ?? ""),
+      row?.displayStudentId || row?.studentId || "",
+      row?.sourcePdf || "",
+      row?.examSetId || "",
+      row?.variantId || "",
+      String(row?.detectedQuestionCount ?? ""),
+      String(row?.variantQuestionCount ?? ""),
+      row ? scoreText(summary.earnedPoints, summary.possiblePoints) : "",
+      row ? formatScore(summary.earnedPoints) : "",
+      row ? formatScore(summary.possiblePoints) : "",
+      row ? String(summary.correctCount ?? 0) : "",
+      row ? String(summary.wrongCount ?? summary.incorrectCount ?? 0) : "",
+      row ? String(summary.blankCount ?? 0) : "",
+      row ? String(summary.missingCount ?? 0) : "",
+      row ? countText(summary.blankCount, summary.missingCount) : "",
+      row ? String(summary.invalidCount ?? 0) : "",
+      row ? formatScore(summary.penaltyPoints) : "",
+      row ? statusLabel(row) : "",
+      row && Array.isArray(row.issues) ? row.issues.join(" | ") : "",
+      row && Array.isArray(row.learningObjectiveSummary) && row.learningObjectiveSummary.length > 0
+        ? objectiveSummaryText(row.learningObjectiveSummary)
+        : "",
+      ...objectiveValues,
     ].map(csvCell).join(","));
   }
 
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const timestamp = new Date().toISOString().replaceAll(":", "-");
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -460,8 +641,9 @@ function renderSummary() {
   const result = state.results;
   const hasResult = Boolean(result);
   elements.gradingResults.classList.toggle("hidden", !hasResult);
-  const isBusy = state.isGrading || state.isAnnotating;
+  const isBusy = state.isGrading || state.isAnnotating || state.isDeletingGradingRun;
   elements.annotateGradedPdfs.disabled = !hasResult || isBusy;
+  elements.deleteGradingRun.disabled = !hasResult || isBusy || !result?.gradingRunId;
   elements.exportGradingCsv.disabled = !hasResult || isBusy;
   elements.recalculateGrading.disabled = !hasResult || isBusy;
   elements.runGrading.disabled = isBusy || state.gradingFiles.length === 0;
@@ -480,6 +662,8 @@ function renderSummary() {
     elements.gradingDetailList.replaceChildren();
     elements.gradingObjectiveReportBody.replaceChildren();
     state.selectedRowIndex = null;
+    state.detailModalOpen = false;
+    renderGradingDetailModal();
     return;
   }
 
@@ -511,15 +695,31 @@ function renderSummary() {
       for (const value of [
         `${objective.id} · ${objective.label}`,
         String(objective.questionCount ?? 0),
-        `${formatScore(objective.earnedPoints)}/${formatScore(objective.possiblePoints)}`,
-        String(objective.correctCount ?? 0),
-        String(objective.wrongCount ?? 0),
-        String((objective.blankCount ?? 0) + (objective.missingCount ?? 0)),
       ]) {
         const cell = document.createElement("td");
         cell.textContent = value;
         row.append(cell);
       }
+
+      const scoreCell = document.createElement("td");
+      scoreCell.append(createScorePill(
+        `${formatScore(objective.earnedPoints)}/${formatScore(objective.possiblePoints)}`,
+        "score",
+      ));
+      row.append(scoreCell);
+
+      const correctCell = document.createElement("td");
+      correctCell.append(createScorePill(String(objective.correctCount ?? 0), "correct"));
+      row.append(correctCell);
+
+      const wrongCell = document.createElement("td");
+      wrongCell.append(createScorePill(String(objective.wrongCount ?? 0), "wrong"));
+      row.append(wrongCell);
+
+      const blankCell = document.createElement("td");
+      blankCell.append(createScorePill(String(objectiveBlankMissingCount(objective)), "blank"));
+      row.append(blankCell);
+
       objectiveFragment.append(row);
     }
   }
@@ -528,7 +728,8 @@ function renderSummary() {
   const tableFragment = document.createDocumentFragment();
   const sortedRows = getSortedRows(result.rows);
   if (!sortedRows.some((row) => row.rowIndex === state.selectedRowIndex)) {
-    state.selectedRowIndex = sortedRows[0]?.rowIndex ?? null;
+    state.selectedRowIndex = null;
+    state.detailModalOpen = false;
   }
 
   for (const row of sortedRows) {
@@ -537,9 +738,11 @@ function renderSummary() {
     if (row.rowIndex === state.selectedRowIndex) {
       tableRow.classList.add("is-selected");
     }
-    tableRow.addEventListener("click", () => {
-      state.selectedRowIndex = row.rowIndex;
-      renderSummary();
+    tableRow.addEventListener("click", (event) => {
+      if (event.target.closest("a, button")) {
+        return;
+      }
+      openGradingDetail(row.rowIndex);
     });
 
     for (const value of [
@@ -569,28 +772,64 @@ function renderSummary() {
       row.examSetId || "—",
       row.variantId || "—",
       row.variantQuestionCount ? `${row.detectedQuestionCount}/${row.variantQuestionCount}` : String(row.detectedQuestionCount),
-      `${formatScore(row.summary.earnedPoints)}/${formatScore(row.summary.possiblePoints)}`,
-      String(row.summary.correctCount),
-      String(row.summary.wrongCount ?? row.summary.incorrectCount ?? 0),
-      String(row.summary.blankCount + row.summary.missingCount),
-      objectiveSummaryText(row.learningObjectiveSummary),
-      gradingFormulaDescription(row.gradingFormula ?? result.gradingFormula),
     ]) {
       const cell = document.createElement("td");
       cell.textContent = value;
       tableRow.append(cell);
     }
+
+    const scoreCell = document.createElement("td");
+    scoreCell.append(createScorePill(
+      `${formatScore(row.summary.earnedPoints)}/${formatScore(row.summary.possiblePoints)}`,
+      "score",
+    ));
+    tableRow.append(scoreCell);
+
+    const correctCell = document.createElement("td");
+    correctCell.append(createScorePill(String(row.summary.correctCount), "correct"));
+    tableRow.append(correctCell);
+
+    const wrongCell = document.createElement("td");
+    wrongCell.append(createScorePill(String(row.summary.wrongCount ?? row.summary.incorrectCount ?? 0), "wrong"));
+    tableRow.append(wrongCell);
+
+    const blankCell = document.createElement("td");
+    blankCell.append(createScorePill(String(row.summary.blankCount + row.summary.missingCount), "blank"));
+    tableRow.append(blankCell);
+
+    const objectiveCell = document.createElement("td");
+    objectiveCell.append(createCompactObjectiveSummaryNode(row.learningObjectiveSummary));
+    tableRow.append(objectiveCell);
+
+    const formulaCell = document.createElement("td");
+    formulaCell.textContent = gradingFormulaDescription(row.gradingFormula ?? result.gradingFormula);
+    tableRow.append(formulaCell);
+
     const statusCell = document.createElement("td");
     const badge = document.createElement("span");
     badge.className = `status-badge status-badge--${statusTone(row)}`;
     badge.textContent = statusLabel(row);
     statusCell.append(badge);
     tableRow.append(statusCell);
+
+    const detailCell = document.createElement("td");
+    const detailButton = document.createElement("button");
+    detailButton.type = "button";
+    detailButton.className = "button button--tiny button--ghost grading-detail-button";
+    detailButton.textContent = "Details";
+    detailButton.setAttribute("aria-label", `Open question-level review for student ${row.displayStudentId}`);
+    detailButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openGradingDetail(row.rowIndex);
+    });
+    detailCell.append(detailButton);
+    tableRow.append(detailCell);
     tableFragment.append(tableRow);
   }
 
   elements.gradingTableBody.replaceChildren(tableFragment);
   renderSelectedDetail(sortedRows);
+  renderGradingDetailModal();
 }
 
 function renderSelectedDetail(rows) {
@@ -647,7 +886,7 @@ function renderSelectedDetail(rows) {
     </div>
     <div class="grading-detail-card__issues">
       <h4>Learning Objectives</h4>
-      <p class="helper-copy">${escapeHtml(objectiveSummaryText(selectedRow.learningObjectiveSummary))}</p>
+      <div class="grading-detail-objectives"></div>
     </div>
     <div class="grading-detail-card__issues">
       <h4>Run-Level Checks</h4>
@@ -671,6 +910,10 @@ function renderSelectedDetail(rows) {
       </table>
     </div>
   `;
+  const objectiveDetail = detail.querySelector(".grading-detail-objectives");
+  if (objectiveDetail) {
+    objectiveDetail.append(createObjectiveSummaryNode(selectedRow.learningObjectiveSummary));
+  }
   elements.gradingDetailList.replaceChildren(detail);
 }
 
@@ -716,7 +959,8 @@ async function loadSavedGradingRun(gradingRunId) {
   }
   state.results = payload.gradingRun;
   state.annotationResults = null;
-  state.selectedRowIndex = state.results.rows?.[0]?.rowIndex ?? null;
+  state.selectedRowIndex = null;
+  state.detailModalOpen = false;
   state.selectedSavedRunId = gradingRunId;
   state.gradingFiles = [];
   elements.gradingInputPath.value = "";
@@ -774,7 +1018,8 @@ async function runGrading() {
     state.results = payload;
     state.selectedSavedRunId = payload.gradingRunId ?? "";
     state.annotationResults = null;
-    state.selectedRowIndex = payload.rows[0]?.rowIndex ?? null;
+    state.selectedRowIndex = null;
+    state.detailModalOpen = false;
     populateGradingFormula(payload.gradingFormula);
     state.validationErrors = [];
     renderErrors();
@@ -826,6 +1071,56 @@ async function annotateGradedPdfs() {
     setStatus(`Downloaded annotated PDF package${annotatedCount ? ` (${annotatedCount} PDF${annotatedCount === "1" ? "" : "s"})` : ""}.`);
   } finally {
     setBusyState(false);
+    renderSummary();
+  }
+}
+
+async function deleteCurrentGradingRun() {
+  if (!state.results?.gradingRunId || state.isDeletingGradingRun) {
+    return;
+  }
+
+  const gradingRunId = state.results.gradingRunId;
+  const label = state.results.inputPath || gradingRunId;
+  if (!window.confirm(`Delete grading run "${label}"? This cannot be undone.`)) {
+    return;
+  }
+
+  state.validationErrors = [];
+  state.isDeletingGradingRun = true;
+  renderErrors();
+  renderSummary();
+  setStatus("Deleting grading run...");
+
+  try {
+    const response = await fetch(`/api/gradings/run/${encodeURIComponent(gradingRunId)}`, {
+      method: "DELETE",
+    });
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+
+    if (!response.ok) {
+      state.validationErrors = payload.errors ?? [{ path: "<grading>", message: "Could not delete grading run" }];
+      renderErrors();
+      setStatus("Delete failed. Review the messages.", true);
+      return;
+    }
+
+    state.results = null;
+    state.annotationResults = null;
+    state.selectedSavedRunId = "";
+    state.selectedRowIndex = null;
+    state.detailModalOpen = false;
+    state.validationErrors = [];
+    renderErrors();
+    await loadSavedGradingRuns();
+    setStatus(`Deleted grading run ${gradingRunId}.`);
+  } finally {
+    state.isDeletingGradingRun = false;
     renderSummary();
   }
 }
@@ -899,11 +1194,20 @@ function wireEvents() {
   elements.annotateModalBackdrop.addEventListener("click", () => {
     closeAnnotateModal();
   });
+  elements.closeGradingDetail.addEventListener("click", () => {
+    closeGradingDetail();
+  });
+  elements.gradingDetailBackdrop.addEventListener("click", () => {
+    closeGradingDetail();
+  });
   elements.runGrading.addEventListener("click", async () => {
     await runGrading();
   });
   elements.recalculateGrading.addEventListener("click", async () => {
     await recalculateCurrentRun();
+  });
+  elements.deleteGradingRun.addEventListener("click", async () => {
+    await deleteCurrentGradingRun();
   });
   elements.gradingFormulaMode.addEventListener("change", () => {
     state.gradingFormula = currentGradingFormula();
@@ -929,14 +1233,17 @@ function wireEvents() {
     renderSummary();
   });
   window.addEventListener("keydown", async (event) => {
-    if (!state.annotateModalOpen) {
-      return;
-    }
     if (event.key === "Escape") {
-      closeAnnotateModal();
+      if (state.annotateModalOpen) {
+        closeAnnotateModal();
+        return;
+      }
+      if (state.detailModalOpen) {
+        closeGradingDetail();
+      }
       return;
     }
-    if (event.key === "Enter") {
+    if (state.annotateModalOpen && event.key === "Enter") {
       event.preventDefault();
       await annotateGradedPdfs();
     }
@@ -945,6 +1252,7 @@ function wireEvents() {
 
 wireEvents();
 renderAnnotateModal();
+renderGradingDetailModal();
 populateGradingFormula();
 renderSummary();
 loadPaths()

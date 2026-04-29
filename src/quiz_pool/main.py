@@ -2580,6 +2580,27 @@ def find_project_grading_run(path: Path, grading_run_id: str) -> dict[str, Any] 
     return payload if isinstance(payload, dict) else None
 
 
+def delete_project_grading_run(path: Path, grading_run_id: str) -> bool:
+    initialize_project_db(path)
+    now = utc_timestamp()
+    with connect_project(path) as connection:
+        cursor = connection.execute(
+            "DELETE FROM grading_runs WHERE grading_run_id = ?",
+            (grading_run_id,),
+        )
+        deleted = cursor.rowcount > 0
+        if deleted:
+            connection.execute(
+                """
+                INSERT INTO project_meta (key, value)
+                VALUES ('updatedAt', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (now,),
+            )
+    return deleted
+
+
 def update_project_grading_run_formula(
     path: Path,
     grading_run_id: str,
@@ -2602,6 +2623,10 @@ def list_active_grading_runs(state: AppState) -> list[dict[str, Any]]:
 
 def find_active_grading_run(state: AppState, grading_run_id: str) -> dict[str, Any] | None:
     return find_project_grading_run(state.project_path, grading_run_id)
+
+
+def delete_active_grading_run(state: AppState, grading_run_id: str) -> bool:
+    return delete_project_grading_run(state.project_path, grading_run_id)
 
 
 def update_active_grading_run_formula(
@@ -4680,6 +4705,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/generator-draft":
                 self.handle_delete_generator_draft()
                 return
+            if parsed.path.startswith("/api/gradings/run/"):
+                self.handle_delete_grading_run(parsed.path)
+                return
             if parsed.path.startswith("/api/exams/set/"):
                 self.handle_delete_exam_set(parsed.path)
                 return
@@ -5032,6 +5060,27 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     "gradingRun": grading_run,
                 }
             )
+
+        def handle_delete_grading_run(self, path: str) -> None:
+            grading_run_id = unquote(path.removeprefix("/api/gradings/run/")).strip()
+            if not grading_run_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
+                return
+
+            try:
+                deleted = delete_active_grading_run(state, grading_run_id)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<gradings>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            if not deleted:
+                self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
+                return
+
+            self.send_json({"ok": True, "gradingRunId": grading_run_id})
 
         def handle_update_grading_run_formula(self, path: str) -> None:
             suffix = "/formula"
