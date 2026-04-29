@@ -62,6 +62,7 @@ const elements = {
   viewerExamName: document.querySelector("#viewer-exam-name"),
   viewerExamSetId: document.querySelector("#viewer-exam-set-id"),
   viewerGeneratedAt: document.querySelector("#viewer-generated-at"),
+  viewerGenerationSeed: document.querySelector("#viewer-generation-seed"),
   viewerHeading: document.querySelector("#viewer-heading"),
   viewerQuestionCount: document.querySelector("#viewer-question-count"),
   viewerQuestionPoolBody: document.querySelector("#viewer-question-pool-body"),
@@ -515,6 +516,7 @@ function renderSelectedExamSet() {
     elements.variantMenu.replaceChildren();
     elements.variantSelect.replaceChildren();
     elements.variantList.replaceChildren();
+    elements.viewerGenerationSeed.textContent = "";
     populatePrintSettingsForm();
     renderSectionToggles();
     return;
@@ -524,6 +526,7 @@ function renderSelectedExamSet() {
   elements.viewerHeading.textContent = summary.printSettings.examName || summary.quiz.title || "Saved Exam Set";
   elements.viewerExamSetId.textContent = examSet.examSetId;
   elements.viewerGeneratedAt.textContent = new Date(examSet.generatedAt).toLocaleString();
+  elements.viewerGenerationSeed.textContent = examSet.generationSeed || summary.generationSeed || examSet.selection?.generationSeed || "—";
   elements.viewerExamName.textContent = summary.printSettings.examName || "—";
   elements.viewerVariantCount.textContent = String(summary.variantCount);
   elements.viewerQuestionCount.textContent = String(summary.selectedQuestionCount);

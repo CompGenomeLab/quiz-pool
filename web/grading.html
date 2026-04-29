@@ -76,12 +76,40 @@
             </label>
           </div>
 
+          <div class="stack">
+            <label class="field field--full">
+              <span>Grading Formula</span>
+              <select id="grading-formula-mode">
+                <option value="none">No Penalty</option>
+                <option value="fixed">Fixed Wrong-Answer Penalty</option>
+                <option value="choice_weighted">Question Points / (Choices - 1)</option>
+              </select>
+            </label>
+            <label id="grading-fixed-penalty-field" class="field field--full hidden">
+              <span>Wrong Penalty Points</span>
+              <input id="grading-fixed-penalty" type="number" min="0" step="0.01" value="0" />
+            </label>
+            <button id="recalculate-grading" class="button button--ghost" type="button" disabled>Recalculate Current Run</button>
+          </div>
+
           <div class="sidebar__actions">
             <button id="browse-grading-file" class="button button--ghost" type="button">Choose PDFs</button>
             <button id="browse-grading-folder" class="button button--ghost" type="button">Choose Folder</button>
             <button id="run-grading" class="button button--primary" type="button">Run Grading</button>
             <input id="grading-pdf-upload" class="visually-hidden-file" type="file" accept=".pdf,application/pdf" multiple />
             <input id="grading-folder-upload" class="visually-hidden-file" type="file" accept=".pdf,application/pdf" webkitdirectory directory multiple />
+          </div>
+
+          <div class="stack">
+            <div class="panel__subhead">
+              <h3>Saved Grading Runs</h3>
+              <p>Reload a previous grading from this project DB.</p>
+            </div>
+            <label class="field field--full">
+              <span>Saved Run</span>
+              <select id="saved-grading-select"></select>
+            </label>
+            <div id="saved-grading-list" class="viewer-set-list"></div>
           </div>
         </aside>
 
@@ -130,6 +158,42 @@
                   <span class="metric__label">Rows With Mismatches</span>
                   <span id="grading-mismatch-count" class="metric__value">0</span>
                 </div>
+                <div class="metric">
+                  <span class="metric__label">Total Score</span>
+                  <span id="grading-total-score" class="metric__value">0/0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Wrong Answers</span>
+                  <span id="grading-total-wrong" class="metric__value">0</span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Formula</span>
+                  <span id="grading-formula-summary" class="metric__value">No Penalty</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Learning Objectives</p>
+                  <h2>Total Objective Report</h2>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="pool-table objective-report-table">
+                  <thead>
+                    <tr>
+                      <th>Objective</th>
+                      <th>Questions</th>
+                      <th>Score</th>
+                      <th>Correct</th>
+                      <th>Wrong</th>
+                      <th>Blank / Missing</th>
+                    </tr>
+                  </thead>
+                  <tbody id="grading-objective-report-body"></tbody>
+                </table>
               </div>
             </section>
 
@@ -159,7 +223,10 @@
                           Correct
                         </button>
                       </th>
+                      <th>Wrong</th>
                       <th>Blank</th>
+                      <th>Objectives</th>
+                      <th>Formula</th>
                       <th>Status</th>
                     </tr>
                   </thead>

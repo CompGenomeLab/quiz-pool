@@ -1,8 +1,15 @@
 import unittest
+import tempfile
+from pathlib import Path
+
+from jsonschema import Draft202012Validator
 
 from src.quiz_pool.main import (
+    AppState,
     build_question_pool_entry,
     extract_question_source_labels,
+    generate_exam_run,
+    load_internal_schema,
     normalize_generation_request,
 )
 
@@ -75,6 +82,56 @@ class ReferenceModelTests(unittest.TestCase):
         entry = build_question_pool_entry(sample_question(), {"LO1": "Explain the concept"})
         self.assertEqual(entry["sources"], ["Chapter 4", "https://example.com/evolution", "Figure 2"])
         self.assertEqual(entry["chapters"], ["Chapter 4", "https://example.com/evolution", "Figure 2"])
+
+    def test_generate_exam_run_uses_saved_seed_for_repeatable_selection_and_variants(self) -> None:
+        quiz = seeded_quiz()
+        request, errors = normalize_generation_request(
+            {
+                "questionCount": 2,
+                "variantCount": 2,
+                "sources": [],
+                "difficulties": [],
+                "learningObjectiveIds": [],
+                "includeQuestionIds": [],
+                "excludeQuestionIds": [],
+                "generationSeed": "repeatable-seed",
+            },
+            quiz,
+        )
+        self.assertEqual(errors, [])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir) / "course.quizpool"
+            state = AppState(
+                db_path=project_path,
+                exam_store_path=project_path,
+                project_path=project_path,
+                validator=Draft202012Validator(load_internal_schema()),
+            )
+            first = generate_exam_run(state, quiz, request)
+            second = generate_exam_run(state, quiz, request)
+
+        self.assertEqual(first["generationSeed"], "repeatable-seed")
+        self.assertEqual(first["selection"]["selectedQuestionIds"], second["selection"]["selectedQuestionIds"])
+        self.assertEqual(
+            [variant["signature"] for variant in first["variants"]],
+            [variant["signature"] for variant in second["variants"]],
+        )
+
+
+def seeded_quiz() -> dict:
+    questions = []
+    for index in range(1, 4):
+        question = sample_question()
+        question["id"] = f"Q{index}"
+        question["question"] = f"Seeded question {index}"
+        question["shuffleChoices"] = False
+        questions.append(question)
+    return {
+        "learningObjectives": [
+            {"id": "LO1", "label": "Explain the concept"},
+        ],
+        "questions": questions,
+    }
 
 
 if __name__ == "__main__":

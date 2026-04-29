@@ -13,6 +13,7 @@ const state = {
   selection: {
     questionCount: 1,
     variantCount: 1,
+    generationSeed: "",
     sources: [],
     difficulties: [],
     learningObjectiveIds: [],
@@ -49,6 +50,7 @@ const elements = {
   filteredCount: document.querySelector("#filtered-count"),
   generateExams: document.querySelector("#generate-exams"),
   generatorStatus: document.querySelector("#generator-status"),
+  generationSeed: document.querySelector("#generation-seed"),
   includedCount: document.querySelector("#included-count"),
   objectiveFilters: document.querySelector("#objective-filters"),
   poolTableBody: document.querySelector("#pool-table-body"),
@@ -64,6 +66,7 @@ const elements = {
   resultExamName: document.querySelector("#result-exam-name"),
   resultExamSetId: document.querySelector("#result-exam-set-id"),
   resultGeneratedAt: document.querySelector("#result-generated-at"),
+  resultGenerationSeed: document.querySelector("#result-generation-seed"),
   resultHeading: document.querySelector("#result-heading"),
   resultSelectedCount: document.querySelector("#result-selected-count"),
   resultVariantCount: document.querySelector("#result-variant-count"),
@@ -640,6 +643,7 @@ function renderGeneratedRun() {
     elements.resultExamName.textContent = "";
     elements.resultCourseName.textContent = "";
     elements.resultExamDate.textContent = "";
+    elements.resultGenerationSeed.textContent = "";
     return;
   }
 
@@ -647,6 +651,7 @@ function renderGeneratedRun() {
   elements.resultHeading.textContent = `${printSettings.examName} Variants`;
   elements.resultExamSetId.textContent = run.examSetId;
   elements.resultGeneratedAt.textContent = new Date(run.generatedAt).toLocaleString();
+  elements.resultGenerationSeed.textContent = run.generationSeed || run.selection?.generationSeed || "—";
   elements.resultSelectedCount.textContent = `${run.selection.selectedQuestionIds.length} selected`;
   elements.resultVariantCount.textContent = `${run.variants.length} generated`;
   elements.resultExamName.textContent = printSettings.examName;
@@ -816,6 +821,7 @@ function currentDraft() {
     selection: {
       questionCount: state.selection.questionCount,
       variantCount: state.selection.variantCount,
+      generationSeed: state.selection.generationSeed,
       sources: [...state.selection.sources],
       difficulties: [...state.selection.difficulties],
       learningObjectiveIds: [...state.selection.learningObjectiveIds],
@@ -875,6 +881,9 @@ function applyGeneratorDraft(draft) {
     Math.max(1, Number.isFinite(questionCount) ? questionCount : state.selection.questionCount),
   );
   state.selection.variantCount = Math.max(1, Number.isFinite(variantCount) ? variantCount : state.selection.variantCount);
+  state.selection.generationSeed = typeof selection.generationSeed === "string"
+    ? selection.generationSeed.slice(0, 128)
+    : "";
   state.selection.sources = Array.isArray(selection.sources)
     ? dedupe(selection.sources.filter((source) => sourceSet.has(source)))
     : [];
@@ -933,6 +942,7 @@ async function loadQuiz() {
   elements.examStorePath.textContent = payload.projectPath ?? state.examStorePath;
   elements.questionCount.value = String(state.selection.questionCount);
   elements.variantCount.value = String(state.selection.variantCount);
+  elements.generationSeed.value = state.selection.generationSeed;
   renderPoolState();
   renderGeneratedRun();
   setStatus("Quiz pool loaded.");
@@ -958,6 +968,7 @@ async function generateExams() {
   const payload = {
     questionCount: Number.parseInt(elements.questionCount.value, 10),
     variantCount: Number.parseInt(elements.variantCount.value, 10),
+    generationSeed: elements.generationSeed.value.trim(),
     sources: [...state.selection.sources],
     difficulties: [...state.selection.difficulties],
     learningObjectiveIds: [...state.selection.learningObjectiveIds],
@@ -982,6 +993,8 @@ async function generateExams() {
   }
 
   state.generatedRun = result;
+  state.selection.generationSeed = result.generationSeed || result.selection?.generationSeed || payload.generationSeed;
+  elements.generationSeed.value = state.selection.generationSeed;
   state.validationErrors = [];
   renderErrors();
   renderGeneratedRun();
@@ -1013,6 +1026,11 @@ function wireEvents() {
 
   elements.variantCount.addEventListener("input", (event) => {
     state.selection.variantCount = Math.max(1, Number.parseInt(event.target.value || "1", 10));
+    scheduleDraftSave();
+  });
+
+  elements.generationSeed.addEventListener("input", (event) => {
+    state.selection.generationSeed = event.target.value.slice(0, 128);
     scheduleDraftSave();
   });
 

@@ -24,8 +24,12 @@ from src.quiz_pool.main import (
     store_project_asset,
     find_project_exam_set,
     get_print_settings,
+    find_project_grading_run,
     update_project_exam_set_print_settings,
+    update_project_grading_run_formula,
     upsert_project_exam_set,
+    upsert_project_grading_run,
+    load_project_grading_runs,
     write_project_generator_draft,
 )
 
@@ -135,6 +139,50 @@ class ProjectStorageTests(unittest.TestCase):
             self.assertEqual(get_print_settings(stored)["examName"], "Updated Midterm")
             self.assertEqual(get_print_settings(stored)["courseName"], "BIO101")
             self.assertEqual(get_print_settings(stored)["examRules"], ["Use [math]x^2[/math]."])
+
+    def test_project_grading_runs_are_saved_and_formula_can_be_updated(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir) / "course.quizpool"
+            grading_run = {
+                "gradingRunId": "grading-001",
+                "gradedAt": "2026-04-29T10:00:00+00:00",
+                "inputPath": "Uploaded PDFs: scan.pdf",
+                "inputKind": "upload",
+                "rows": [
+                    {
+                        "rowIndex": 1,
+                        "sourcePdf": "scan.pdf",
+                        "studentId": "123",
+                        "displayStudentId": "123",
+                        "summary": {},
+                        "questionDetails": [
+                            {
+                                "status": "incorrect",
+                                "points": 1,
+                                "allowedChoices": ["A", "B", "C", "D"],
+                                "learningObjectives": [{"id": "LO1", "label": "Objective 1"}],
+                            }
+                        ],
+                    }
+                ],
+                "summary": {"processedCount": 1, "knownStudentCount": 1},
+            }
+
+            stored = upsert_project_grading_run(project_path, grading_run)
+            summaries = load_project_grading_runs(project_path)
+            updated = update_project_grading_run_formula(
+                project_path,
+                "grading-001",
+                {"mode": "fixed", "wrongPenalty": 0.5},
+            )
+            reloaded = find_project_grading_run(project_path, "grading-001")
+
+            self.assertEqual(stored["report"]["total"]["earnedPoints"], 0)
+            self.assertEqual(len(summaries), 1)
+            self.assertEqual(summaries[0]["gradingRunId"], "grading-001")
+            self.assertIsNotNone(updated)
+            self.assertEqual(reloaded["gradingFormula"]["mode"], "fixed")
+            self.assertEqual(reloaded["report"]["total"]["earnedPoints"], -0.5)
 
     def test_system_file_dialog_allows_expected_selection_types(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

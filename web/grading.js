@@ -11,6 +11,12 @@ const state = {
   isAnnotating: false,
   isGrading: false,
   results: null,
+  savedRuns: [],
+  selectedSavedRunId: "",
+  gradingFormula: {
+    mode: "none",
+    wrongPenalty: 0,
+  },
   correctSortDirection: "desc",
   selectedRowIndex: null,
   statusIsError: false,
@@ -45,7 +51,17 @@ const elements = {
   gradingStatus: document.querySelector("#grading-status"),
   gradingTableBody: document.querySelector("#grading-table-body"),
   gradingDetailList: document.querySelector("#grading-detail-list"),
+  gradingFormulaMode: document.querySelector("#grading-formula-mode"),
+  gradingFixedPenalty: document.querySelector("#grading-fixed-penalty"),
+  gradingFixedPenaltyField: document.querySelector("#grading-fixed-penalty-field"),
+  gradingFormulaSummary: document.querySelector("#grading-formula-summary"),
+  gradingObjectiveReportBody: document.querySelector("#grading-objective-report-body"),
+  gradingTotalScore: document.querySelector("#grading-total-score"),
+  gradingTotalWrong: document.querySelector("#grading-total-wrong"),
+  recalculateGrading: document.querySelector("#recalculate-grading"),
   runGrading: document.querySelector("#run-grading"),
+  savedGradingList: document.querySelector("#saved-grading-list"),
+  savedGradingSelect: document.querySelector("#saved-grading-select"),
   sortCorrect: document.querySelector("#sort-correct"),
   busyCopy: document.querySelector("#grading-busy-copy"),
   busyOverlay: document.querySelector("#grading-busy-overlay"),
@@ -156,6 +172,74 @@ function statusLabel(row) {
   return "Ready";
 }
 
+function formatScore(value) {
+  const number = Number(value ?? 0);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  if (Number.isInteger(number)) {
+    return String(number);
+  }
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 3,
+    minimumFractionDigits: 0,
+  }).format(number);
+}
+
+function gradingFormulaDescription(formula = {}) {
+  if (formula.description) {
+    return formula.description;
+  }
+  if (formula.mode === "fixed") {
+    return `Correct answers earn question points; incorrect or invalid answers subtract ${formatScore(formula.wrongPenalty)} point(s).`;
+  }
+  if (formula.mode === "choice_weighted") {
+    return "Correct answers earn question points; incorrect or invalid answers subtract question points divided by answer choices minus 1.";
+  }
+  return "Correct answers earn question points; blank, incorrect, and invalid answers receive no penalty.";
+}
+
+function currentGradingFormula() {
+  const mode = elements.gradingFormulaMode.value;
+  const wrongPenalty = Math.max(0, Number.parseFloat(elements.gradingFixedPenalty.value || "0"));
+  return {
+    mode,
+    wrongPenalty: Number.isFinite(wrongPenalty) ? wrongPenalty : 0,
+  };
+}
+
+function populateGradingFormula(formula = {}) {
+  const mode = ["none", "fixed", "choice_weighted"].includes(formula.mode) ? formula.mode : "none";
+  elements.gradingFormulaMode.value = mode;
+  elements.gradingFixedPenalty.value = String(formula.wrongPenalty ?? 0);
+  state.gradingFormula = currentGradingFormula();
+  renderFormulaControls();
+}
+
+function renderFormulaControls() {
+  const mode = elements.gradingFormulaMode.value;
+  const isFixed = mode === "fixed";
+  elements.gradingFixedPenaltyField.classList.toggle("hidden", !isFixed);
+  elements.gradingFixedPenalty.disabled = !isFixed || state.isGrading || state.isAnnotating;
+}
+
+function objectiveSummaryText(items = []) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return "—";
+  }
+  return items.map((item) => {
+    const label = item.id ? `${item.id}` : "Objective";
+    return `${label}: ${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)} C${item.correctCount ?? 0} W${item.wrongCount ?? 0}`;
+  }).join(" | ");
+}
+
+function sourcePdfUrl(row) {
+  if (!state.results?.gradingRunId || !row.rowIndex) {
+    return "";
+  }
+  return `/api/gradings/source/${encodeURIComponent(state.results.gradingRunId)}/${encodeURIComponent(row.rowIndex)}.pdf`;
+}
+
 function csvCell(value) {
   const normalized = String(value ?? "");
   if (normalized.includes('"') || normalized.includes(",") || normalized.includes("\n")) {
@@ -211,10 +295,64 @@ function setGradingFiles(files) {
   state.results = null;
   state.annotationResults = null;
   state.validationErrors = [];
+  state.selectedSavedRunId = "";
   elements.gradingInputPath.value = formatFileSelection(files);
   renderErrors();
   renderSummary();
+  renderSavedRuns();
   setStatus(files.length ? `${files.length} PDF${files.length === 1 ? "" : "s"} selected.` : "No PDFs selected.");
+}
+
+function gradingRunLabel(summary) {
+  const when = summary.gradedAt ? new Date(summary.gradedAt).toLocaleString() : "Unknown time";
+  const score = `${formatScore(summary.earnedPoints)}/${formatScore(summary.possiblePoints)}`;
+  return `${when} · ${summary.processedCount ?? 0} PDF(s) · ${score}`;
+}
+
+function renderSavedRuns() {
+  const selectFragment = document.createDocumentFragment();
+  if (state.savedRuns.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No saved grading runs";
+    selectFragment.append(option);
+  } else {
+    for (const summary of state.savedRuns) {
+      const option = document.createElement("option");
+      option.value = summary.gradingRunId;
+      option.textContent = gradingRunLabel(summary);
+      option.selected = summary.gradingRunId === state.selectedSavedRunId;
+      selectFragment.append(option);
+    }
+  }
+  elements.savedGradingSelect.replaceChildren(selectFragment);
+  elements.savedGradingSelect.disabled = state.savedRuns.length === 0 || state.isGrading || state.isAnnotating;
+
+  const listFragment = document.createDocumentFragment();
+  for (const summary of state.savedRuns) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "question-tile";
+    if (summary.gradingRunId === state.selectedSavedRunId) {
+      button.classList.add("is-selected");
+    }
+
+    const id = document.createElement("span");
+    id.className = "question-tile__id";
+    id.textContent = summary.inputPath || summary.gradingRunId;
+
+    const text = document.createElement("span");
+    text.className = "question-tile__text";
+    text.textContent = gradingRunLabel(summary);
+
+    button.append(id, text);
+    button.disabled = state.isGrading || state.isAnnotating;
+    button.addEventListener("click", async () => {
+      await loadSavedGradingRun(summary.gradingRunId);
+    });
+    listFragment.append(button);
+  }
+  elements.savedGradingList.replaceChildren(listFragment);
 }
 
 function downloadBlob(blob, filename) {
@@ -233,7 +371,38 @@ function downloadGradingCsv() {
   }
 
   const rows = getSortedRows(state.results.rows);
+  const reportTotal = state.results.report?.total ?? {};
+  const formulaDescription = gradingFormulaDescription(state.results.gradingFormula);
   const lines = [
+    ["Run Summary"].map(csvCell).join(","),
+    ["Grading Run ID", state.results.gradingRunId || ""].map(csvCell).join(","),
+    ["Graded At", state.results.gradedAt || ""].map(csvCell).join(","),
+    ["Input", state.results.inputPath || ""].map(csvCell).join(","),
+    ["Formula", formulaDescription].map(csvCell).join(","),
+    ["Processed PDFs", state.results.summary.processedCount].map(csvCell).join(","),
+    ["Total Score", `${formatScore(reportTotal.earnedPoints)}/${formatScore(reportTotal.possiblePoints)}`].map(csvCell).join(","),
+    ["Total Correct", reportTotal.correctCount ?? 0].map(csvCell).join(","),
+    ["Total Wrong", reportTotal.wrongCount ?? 0].map(csvCell).join(","),
+    "",
+    ["Learning Objective Summary"].map(csvCell).join(","),
+    [
+      "Objective",
+      "Questions",
+      "Score",
+      "Correct",
+      "Wrong",
+      "Blank / Missing",
+    ].map(csvCell).join(","),
+    ...((state.results.report?.learningObjectives ?? []).map((objective) => [
+      `${objective.id} · ${objective.label}`,
+      String(objective.questionCount ?? 0),
+      `${formatScore(objective.earnedPoints)}/${formatScore(objective.possiblePoints)}`,
+      String(objective.correctCount ?? 0),
+      String(objective.wrongCount ?? 0),
+      String((objective.blankCount ?? 0) + (objective.missingCount ?? 0)),
+    ].map(csvCell).join(","))),
+    "",
+    ["Student Rows"].map(csvCell).join(","),
     [
       "Row",
       "Student ID",
@@ -243,7 +412,12 @@ function downloadGradingCsv() {
       "Questions",
       "Score",
       "Correct",
+      "Wrong",
       "Blank",
+      "Invalid",
+      "Penalty",
+      "Formula",
+      "Learning Objectives",
       "Status",
     ].map(csvCell).join(","),
   ];
@@ -259,9 +433,14 @@ function downloadGradingCsv() {
       row.examSetId || "—",
       row.variantId || "—",
       questionCount,
-      `${row.summary.earnedPoints ?? 0}/${row.summary.possiblePoints ?? 0}`,
+      `${formatScore(row.summary.earnedPoints)}/${formatScore(row.summary.possiblePoints)}`,
       String(row.summary.correctCount),
+      String(row.summary.wrongCount ?? row.summary.incorrectCount ?? 0),
       String(row.summary.blankCount + row.summary.missingCount),
+      String(row.summary.invalidCount ?? 0),
+      formatScore(row.summary.penaltyPoints),
+      gradingFormulaDescription(row.gradingFormula ?? state.results.gradingFormula),
+      objectiveSummaryText(row.learningObjectiveSummary),
       statusLabel(row),
     ].map(csvCell).join(","));
   }
@@ -284,21 +463,28 @@ function renderSummary() {
   const isBusy = state.isGrading || state.isAnnotating;
   elements.annotateGradedPdfs.disabled = !hasResult || isBusy;
   elements.exportGradingCsv.disabled = !hasResult || isBusy;
+  elements.recalculateGrading.disabled = !hasResult || isBusy;
   elements.runGrading.disabled = isBusy || state.gradingFiles.length === 0;
   elements.browseGradingFile.disabled = isBusy;
   elements.browseGradingFolder.disabled = isBusy;
   elements.gradingPdfUpload.disabled = isBusy;
   elements.gradingFolderUpload.disabled = isBusy;
   elements.gradingInputPath.disabled = isBusy;
+  elements.gradingFormulaMode.disabled = isBusy;
   elements.sortCorrect.disabled = isBusy;
+  renderFormulaControls();
+  renderSavedRuns();
   updateSortButton();
   if (!hasResult) {
     elements.gradingTableBody.replaceChildren();
     elements.gradingDetailList.replaceChildren();
+    elements.gradingObjectiveReportBody.replaceChildren();
     state.selectedRowIndex = null;
     return;
   }
 
+  const reportTotal = result.report?.total ?? {};
+  const formulaDescription = gradingFormulaDescription(result.gradingFormula);
   elements.gradingHeading.textContent = `Grading Results (${result.summary.processedCount} PDF${result.summary.processedCount === 1 ? "" : "s"})`;
   elements.gradingResultPath.textContent = result.inputPath;
   elements.gradingProcessedCount.textContent = String(result.summary.processedCount);
@@ -306,6 +492,38 @@ function renderSummary() {
   elements.gradingDuplicateCount.textContent = String(result.summary.duplicateStudentIdCount ?? 0);
   elements.gradingOErrorCount.textContent = String(result.summary.omrErrorCount);
   elements.gradingMismatchCount.textContent = String(result.summary.mismatchCount);
+  elements.gradingTotalScore.textContent = `${formatScore(reportTotal.earnedPoints)}/${formatScore(reportTotal.possiblePoints)}`;
+  elements.gradingTotalWrong.textContent = String(reportTotal.wrongCount ?? 0);
+  elements.gradingFormulaSummary.textContent = formulaDescription;
+
+  const objectiveFragment = document.createDocumentFragment();
+  const objectives = Array.isArray(result.report?.learningObjectives) ? result.report.learningObjectives : [];
+  if (objectives.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.textContent = "No learning-objective data is available for this grading run.";
+    row.append(cell);
+    objectiveFragment.append(row);
+  } else {
+    for (const objective of objectives) {
+      const row = document.createElement("tr");
+      for (const value of [
+        `${objective.id} · ${objective.label}`,
+        String(objective.questionCount ?? 0),
+        `${formatScore(objective.earnedPoints)}/${formatScore(objective.possiblePoints)}`,
+        String(objective.correctCount ?? 0),
+        String(objective.wrongCount ?? 0),
+        String((objective.blankCount ?? 0) + (objective.missingCount ?? 0)),
+      ]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.append(cell);
+      }
+      objectiveFragment.append(row);
+    }
+  }
+  elements.gradingObjectiveReportBody.replaceChildren(objectiveFragment);
 
   const tableFragment = document.createDocumentFragment();
   const sortedRows = getSortedRows(result.rows);
@@ -327,13 +545,36 @@ function renderSummary() {
     for (const value of [
       String(row.rowIndex ?? "—"),
       row.displayStudentId,
-      row.sourcePdf || "—",
+    ]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      tableRow.append(cell);
+    }
+
+    const sourceCell = document.createElement("td");
+    const sourceUrl = sourcePdfUrl(row);
+    if (sourceUrl) {
+      const link = document.createElement("a");
+      link.href = sourceUrl;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = row.sourcePdf || "Open PDF";
+      sourceCell.append(link);
+    } else {
+      sourceCell.textContent = row.sourcePdf || "—";
+    }
+    tableRow.append(sourceCell);
+
+    for (const value of [
       row.examSetId || "—",
       row.variantId || "—",
       row.variantQuestionCount ? `${row.detectedQuestionCount}/${row.variantQuestionCount}` : String(row.detectedQuestionCount),
-      `${row.summary.earnedPoints ?? 0}/${row.summary.possiblePoints ?? 0}`,
+      `${formatScore(row.summary.earnedPoints)}/${formatScore(row.summary.possiblePoints)}`,
       String(row.summary.correctCount),
+      String(row.summary.wrongCount ?? row.summary.incorrectCount ?? 0),
       String(row.summary.blankCount + row.summary.missingCount),
+      objectiveSummaryText(row.learningObjectiveSummary),
+      gradingFormulaDescription(row.gradingFormula ?? result.gradingFormula),
     ]) {
       const cell = document.createElement("td");
       cell.textContent = value;
@@ -375,7 +616,7 @@ function renderSelectedDetail(rows) {
         <td>${escapeHtml(question.allowedChoices.join(", ") || "—")}</td>
         <td>${escapeHtml(question.markedAnswers.join(", ") || "—")}</td>
         <td>${escapeHtml(question.correctAnswers.join(", ") || "—")}</td>
-        <td>${question.earnedPoints ?? 0}/${question.points ?? 1}</td>
+        <td>${formatScore(question.earnedPoints ?? 0)}/${formatScore(question.points ?? 1)}${question.penaltyPoints ? ` (-${formatScore(question.penaltyPoints)})` : ""}</td>
         <td>${escapeHtml(question.status)}</td>
         <td class="cell-copy">${escapeHtml(question.issues.join(" ") || "—")}</td>
       </tr>
@@ -392,12 +633,21 @@ function renderSelectedDetail(rows) {
       <span class="status-badge status-badge--${statusTone(selectedRow)}">${escapeHtml(statusLabel(selectedRow))}</span>
     </div>
     <div class="grading-detail-metrics">
-      <div class="metric"><span class="metric__label">Score</span><span class="metric__value">${selectedRow.summary.earnedPoints ?? 0} / ${selectedRow.summary.possiblePoints ?? 0}</span></div>
+      <div class="metric"><span class="metric__label">Score</span><span class="metric__value">${formatScore(selectedRow.summary.earnedPoints)} / ${formatScore(selectedRow.summary.possiblePoints)}</span></div>
       <div class="metric"><span class="metric__label">Correct</span><span class="metric__value">${selectedRow.summary.correctCount}</span></div>
-      <div class="metric"><span class="metric__label">Incorrect</span><span class="metric__value">${selectedRow.summary.incorrectCount}</span></div>
+      <div class="metric"><span class="metric__label">Wrong</span><span class="metric__value">${selectedRow.summary.wrongCount ?? selectedRow.summary.incorrectCount}</span></div>
+      <div class="metric"><span class="metric__label">Penalty</span><span class="metric__value">${formatScore(selectedRow.summary.penaltyPoints)}</span></div>
       <div class="metric"><span class="metric__label">Blank</span><span class="metric__value">${selectedRow.summary.blankCount}</span></div>
       <div class="metric"><span class="metric__label">Missing</span><span class="metric__value">${selectedRow.summary.missingCount}</span></div>
       <div class="metric"><span class="metric__label">Invalid</span><span class="metric__value">${selectedRow.summary.invalidCount}</span></div>
+    </div>
+    <div class="grading-detail-card__issues">
+      <h4>Formula</h4>
+      <p class="helper-copy">${escapeHtml(gradingFormulaDescription(selectedRow.gradingFormula ?? state.results?.gradingFormula))}</p>
+    </div>
+    <div class="grading-detail-card__issues">
+      <h4>Learning Objectives</h4>
+      <p class="helper-copy">${escapeHtml(objectiveSummaryText(selectedRow.learningObjectiveSummary))}</p>
     </div>
     <div class="grading-detail-card__issues">
       <h4>Run-Level Checks</h4>
@@ -438,6 +688,46 @@ async function loadPaths() {
   setStatus("Ready to grade filled OMR PDFs.");
 }
 
+async function loadSavedGradingRuns({ loadLatest = false } = {}) {
+  const response = await fetch("/api/gradings");
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.errors?.[0]?.message ?? `Could not load saved grading runs (${response.status})`);
+  }
+  state.savedRuns = Array.isArray(payload.gradingRuns) ? payload.gradingRuns : [];
+  renderSavedRuns();
+  if (loadLatest && state.savedRuns.length > 0 && !state.results) {
+    await loadSavedGradingRun(state.savedRuns[0].gradingRunId);
+  }
+}
+
+async function loadSavedGradingRun(gradingRunId) {
+  if (!gradingRunId) {
+    return;
+  }
+  setStatus("Loading saved grading run...");
+  const response = await fetch(`/api/gradings/run/${encodeURIComponent(gradingRunId)}`);
+  const payload = await response.json();
+  if (!response.ok) {
+    state.validationErrors = payload.errors ?? [{ path: "<grading>", message: "Could not load saved grading run" }];
+    renderErrors();
+    setStatus("Saved grading run load failed.", true);
+    return;
+  }
+  state.results = payload.gradingRun;
+  state.annotationResults = null;
+  state.selectedRowIndex = state.results.rows?.[0]?.rowIndex ?? null;
+  state.selectedSavedRunId = gradingRunId;
+  state.gradingFiles = [];
+  elements.gradingInputPath.value = "";
+  populateGradingFormula(state.results.gradingFormula);
+  state.validationErrors = [];
+  renderErrors();
+  renderSummary();
+  renderSavedRuns();
+  setStatus(`Loaded saved grading run ${gradingRunId}.`);
+}
+
 async function runGrading() {
   if (state.gradingFiles.length === 0) {
     state.validationErrors = [{ path: "pdfs", message: "Choose at least one PDF before running grading." }];
@@ -465,6 +755,9 @@ async function runGrading() {
 
     const response = await fetch("/api/exams/grade-upload", {
       method: "POST",
+      headers: {
+        "X-Quiz-Pool-Grading-Formula": JSON.stringify(currentGradingFormula()),
+      },
       body: formData,
     });
 
@@ -479,11 +772,14 @@ async function runGrading() {
     }
 
     state.results = payload;
+    state.selectedSavedRunId = payload.gradingRunId ?? "";
     state.annotationResults = null;
     state.selectedRowIndex = payload.rows[0]?.rowIndex ?? null;
+    populateGradingFormula(payload.gradingFormula);
     state.validationErrors = [];
     renderErrors();
     renderSummary();
+    await loadSavedGradingRuns();
     setStatus(`Processed ${payload.summary.processedCount} PDF(s).`);
   } finally {
     setBusyState(false);
@@ -534,6 +830,38 @@ async function annotateGradedPdfs() {
   }
 }
 
+async function recalculateCurrentRun() {
+  if (!state.results?.gradingRunId) {
+    return;
+  }
+  state.validationErrors = [];
+  renderErrors();
+  setStatus("Recalculating grading scores...");
+  const gradingRunId = state.results.gradingRunId;
+  const response = await fetch(`/api/gradings/run/${encodeURIComponent(gradingRunId)}/formula`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      gradingFormula: currentGradingFormula(),
+    }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    state.validationErrors = payload.errors ?? [{ path: "<grading>", message: "Could not recalculate grading scores" }];
+    renderErrors();
+    setStatus("Recalculation failed. Review the messages.", true);
+    return;
+  }
+  state.results = payload.gradingRun;
+  state.selectedSavedRunId = gradingRunId;
+  populateGradingFormula(state.results.gradingFormula);
+  renderSummary();
+  await loadSavedGradingRuns();
+  setStatus("Recalculated scores for the current grading run.");
+}
+
 function wireEvents() {
   if (!("webkitdirectory" in elements.gradingFolderUpload)) {
     elements.browseGradingFolder.hidden = true;
@@ -574,6 +902,25 @@ function wireEvents() {
   elements.runGrading.addEventListener("click", async () => {
     await runGrading();
   });
+  elements.recalculateGrading.addEventListener("click", async () => {
+    await recalculateCurrentRun();
+  });
+  elements.gradingFormulaMode.addEventListener("change", () => {
+    state.gradingFormula = currentGradingFormula();
+    renderFormulaControls();
+    if (state.results) {
+      setStatus("Grading formula changed. Recalculate the current run to update saved scores.");
+    }
+  });
+  elements.gradingFixedPenalty.addEventListener("input", () => {
+    state.gradingFormula = currentGradingFormula();
+    if (state.results) {
+      setStatus("Grading formula changed. Recalculate the current run to update saved scores.");
+    }
+  });
+  elements.savedGradingSelect.addEventListener("change", async (event) => {
+    await loadSavedGradingRun(event.target.value);
+  });
   elements.exportGradingCsv.addEventListener("click", () => {
     downloadGradingCsv();
   });
@@ -598,8 +945,11 @@ function wireEvents() {
 
 wireEvents();
 renderAnnotateModal();
+populateGradingFormula();
 renderSummary();
-loadPaths().catch((error) => {
-  console.error(error);
-  setStatus(error.message, true);
-});
+loadPaths()
+  .then(() => loadSavedGradingRuns({ loadLatest: true }))
+  .catch((error) => {
+    console.error(error);
+    setStatus(error.message, true);
+  });

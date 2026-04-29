@@ -65,6 +65,7 @@ LATEX_FONT_ASSET_PATHS = {
 LATEX_VARIANT_QR_DISPLAY_WIDTH = "0.78in"
 QUESTION_PAGE_CAPACITY = 130
 MAX_QUESTIONS_PER_EXAM = 100
+MAX_GENERATION_SEED_LENGTH = 128
 DEFAULT_OMR_INSTRUCTIONS = (
     "Fill bubbles fully. Complete all ID columns with leading zeros (e.g., 00012345)."
 )
@@ -76,6 +77,8 @@ DEFAULT_EXAM_RULES = [
     "Remain seated until instructed to stop and submit your paper.",
 ]
 GRADE_ALLOWED_LABELS = set(DISPLAY_KEYS)
+DEFAULT_GRADING_FORMULA_MODE = "none"
+GRADING_FORMULA_MODES = {"none", "fixed", "choice_weighted"}
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
 IMAGE_ASSET_EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg"}
 MATH_TAG_PATTERN = re.compile(r"\[math\]([\s\S]*?)\[/math\]", re.IGNORECASE)
@@ -281,6 +284,12 @@ def initialize_project_db(path: Path) -> None:
               id INTEGER PRIMARY KEY CHECK (id = 1),
               draft TEXT NOT NULL,
               updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS grading_runs (
+              grading_run_id TEXT PRIMARY KEY,
+              graded_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              document TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS assets (
               asset_id TEXT PRIMARY KEY,
@@ -1532,6 +1541,128 @@ def normalize_optional_positive_int(
     return value
 
 
+def normalize_optional_seed(
+    payload: dict[str, Any], key: str, errors: list[dict[str, str]]
+) -> str:
+    value = payload.get(key, "")
+    if value in (None, ""):
+        return ""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        errors.append({"path": key, "message": f"{key} must be text or an integer"})
+        return ""
+    seed = str(value).strip()
+    if len(seed) > MAX_GENERATION_SEED_LENGTH:
+        errors.append(
+            {
+                "path": key,
+                "message": f"{key} must be {MAX_GENERATION_SEED_LENGTH} characters or fewer",
+            }
+        )
+    return seed
+
+
+def random_generation_seed() -> str:
+    return f"{random.SystemRandom().getrandbits(64):016x}"
+
+
+def normalize_score_number(value: float) -> int | float:
+    if math.isclose(value, round(value), abs_tol=1e-9):
+        return int(round(value))
+    return round(value, 6)
+
+
+def grading_formula_description(formula: dict[str, Any]) -> str:
+    mode = str(formula.get("mode") or DEFAULT_GRADING_FORMULA_MODE)
+    if mode == "fixed":
+        penalty = float(formula.get("wrongPenalty") or 0)
+        return f"Correct answers earn question points; incorrect or invalid answers subtract {normalize_score_number(penalty)} point(s)."
+    if mode == "choice_weighted":
+        return "Correct answers earn question points; incorrect or invalid answers subtract question points divided by answer choices minus 1."
+    return "Correct answers earn question points; blank, incorrect, and invalid answers receive no penalty."
+
+
+def grading_formula_with_description(formula: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = formula if isinstance(formula, dict) else {}
+    mode = str(raw.get("mode") or DEFAULT_GRADING_FORMULA_MODE)
+    if mode not in GRADING_FORMULA_MODES:
+        mode = DEFAULT_GRADING_FORMULA_MODE
+    wrong_penalty = float(raw.get("wrongPenalty") or 0)
+    normalized = {
+        "mode": mode,
+        "wrongPenalty": normalize_score_number(wrong_penalty if mode == "fixed" else 0),
+    }
+    normalized["description"] = grading_formula_description(normalized)
+    return normalized
+
+
+def normalize_nonnegative_float_value(
+    value: Any,
+    *,
+    path: str,
+    errors: list[dict[str, str]],
+) -> float:
+    if value in (None, ""):
+        return 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        errors.append({"path": path, "message": f"{path} must be a non-negative number"})
+        return 0.0
+    try:
+        number = float(value)
+    except ValueError:
+        errors.append({"path": path, "message": f"{path} must be a non-negative number"})
+        return 0.0
+    if not math.isfinite(number) or number < 0:
+        errors.append({"path": path, "message": f"{path} must be a non-negative number"})
+        return 0.0
+    return number
+
+
+def normalize_grading_formula_payload(
+    payload: Any,
+) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    if payload in (None, ""):
+        return grading_formula_with_description(), []
+    if not isinstance(payload, dict):
+        return None, [{"path": "gradingFormula", "message": "gradingFormula must be an object"}]
+
+    errors: list[dict[str, str]] = []
+    raw_mode = normalize_optional_string(payload, "mode", errors) or DEFAULT_GRADING_FORMULA_MODE
+    mode_aliases = {
+        "no_penalty": "none",
+        "none": "none",
+        "fixed": "fixed",
+        "fixed_wrong": "fixed",
+        "choice_count": "choice_weighted",
+        "choice_weighted": "choice_weighted",
+        "per_choice": "choice_weighted",
+    }
+    mode = mode_aliases.get(raw_mode)
+    if mode is None:
+        errors.append(
+            {
+                "path": "gradingFormula.mode",
+                "message": "mode must be none, fixed, or choice_weighted",
+            }
+        )
+        mode = DEFAULT_GRADING_FORMULA_MODE
+
+    raw_penalty = payload.get("wrongPenalty", payload.get("fixedPenalty", 0))
+    wrong_penalty = normalize_nonnegative_float_value(
+        raw_penalty,
+        path="gradingFormula.wrongPenalty",
+        errors=errors,
+    )
+    if errors:
+        return None, errors
+
+    return grading_formula_with_description(
+        {
+            "mode": mode,
+            "wrongPenalty": wrong_penalty,
+        }
+    ), []
+
+
 def normalize_rule_list(
     payload: dict[str, Any], key: str, errors: list[dict[str, str]]
 ) -> list[str]:
@@ -1650,6 +1781,7 @@ def normalize_generation_request(
     allowed_materials = normalize_optional_string(payload, "allowedMaterials", errors)
     omr_instructions = normalize_optional_string(payload, "omrInstructions", errors)
     exam_rules = normalize_rule_list(payload, "examRules", errors)
+    generation_seed = normalize_optional_seed(payload, "generationSeed", errors)
 
     known_objective_ids = {
         objective["id"]
@@ -1713,6 +1845,7 @@ def normalize_generation_request(
             "allowedMaterials": allowed_materials,
             "omrInstructions": omr_instructions,
             "examRules": exam_rules,
+            "generationSeed": generation_seed,
         },
         [],
     )
@@ -1748,11 +1881,15 @@ def normalize_grading_request(payload: Any) -> tuple[dict[str, Any] | None, list
 
     errors: list[dict[str, str]] = []
     input_path = normalize_optional_string(payload, "inputPath", errors)
+    grading_formula, formula_errors = normalize_grading_formula_payload(
+        payload.get("gradingFormula", payload.get("formula"))
+    )
+    errors.extend(formula_errors)
     if not input_path:
         errors.append({"path": "inputPath", "message": "inputPath must be a non-empty path to a PDF or directory"})
     if errors:
         return None, errors
-    return ({"inputPath": input_path}, [])
+    return ({"inputPath": input_path, "gradingFormula": grading_formula}, [])
 
 
 def normalize_annotation_request(payload: Any) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
@@ -1851,9 +1988,240 @@ def build_variant_lookup(store: dict[str, Any]) -> dict[str, tuple[dict[str, Any
     return lookup
 
 
+def question_learning_objectives(question: dict[str, Any]) -> list[dict[str, str]]:
+    raw_objectives = question.get("learningObjectives")
+    if isinstance(raw_objectives, list) and raw_objectives:
+        objectives: list[dict[str, str]] = []
+        for objective in raw_objectives:
+            if not isinstance(objective, dict):
+                continue
+            objective_id = str(objective.get("id") or "").strip()
+            label = str(objective.get("label") or objective_id).strip()
+            if objective_id:
+                objectives.append({"id": objective_id, "label": label or objective_id})
+        if objectives:
+            return objectives
+
+    raw_ids = question.get("learningObjectiveIds")
+    if not isinstance(raw_ids, list):
+        return []
+    return [
+        {"id": objective_id.strip(), "label": objective_id.strip()}
+        for objective_id in raw_ids
+        if isinstance(objective_id, str) and objective_id.strip()
+    ]
+
+
+def grading_penalty_points(
+    *,
+    status: str,
+    points: float,
+    choice_count: int,
+    formula: dict[str, Any],
+) -> float:
+    if status not in {"incorrect", "invalid"}:
+        return 0.0
+    mode = str(formula.get("mode") or DEFAULT_GRADING_FORMULA_MODE)
+    if mode == "fixed":
+        return float(formula.get("wrongPenalty") or 0)
+    if mode == "choice_weighted":
+        return points / max(choice_count - 1, 1)
+    return 0.0
+
+
+def empty_objective_report_item(objective_id: str, label: str) -> dict[str, Any]:
+    return {
+        "id": objective_id,
+        "label": label or objective_id,
+        "possiblePoints": 0.0,
+        "correctPoints": 0.0,
+        "penaltyPoints": 0.0,
+        "earnedPoints": 0.0,
+        "questionCount": 0,
+        "correctCount": 0,
+        "incorrectCount": 0,
+        "blankCount": 0,
+        "missingCount": 0,
+        "invalidCount": 0,
+    }
+
+
+def finalize_objective_report_item(item: dict[str, Any]) -> dict[str, Any]:
+    finalized = dict(item)
+    for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+        finalized[key] = normalize_score_number(float(finalized.get(key) or 0))
+    finalized["wrongCount"] = int(finalized.get("incorrectCount") or 0) + int(finalized.get("invalidCount") or 0)
+    return finalized
+
+
+def recalculate_grading_row(row: dict[str, Any], formula: dict[str, Any]) -> dict[str, Any]:
+    normalized_formula = grading_formula_with_description(formula)
+    summary = {
+        "correctCount": 0,
+        "incorrectCount": 0,
+        "blankCount": 0,
+        "missingCount": 0,
+        "invalidCount": 0,
+        "earnedPoints": 0.0,
+        "correctPoints": 0.0,
+        "penaltyPoints": 0.0,
+        "possiblePoints": 0.0,
+    }
+    objective_reports: dict[str, dict[str, Any]] = {}
+
+    for detail in row.get("questionDetails", []):
+        if not isinstance(detail, dict):
+            continue
+        status = str(detail.get("status") or "")
+        points = float(detail.get("points") or 0)
+        allowed_choices = detail.get("allowedChoices")
+        choice_count = len(allowed_choices) if isinstance(allowed_choices, list) else 0
+        correct_points = points if status == "correct" else 0.0
+        penalty_points = grading_penalty_points(
+            status=status,
+            points=points,
+            choice_count=choice_count,
+            formula=normalized_formula,
+        )
+        earned_points = correct_points - penalty_points
+
+        detail["correctPoints"] = normalize_score_number(correct_points)
+        detail["penaltyPoints"] = normalize_score_number(penalty_points)
+        detail["earnedPoints"] = normalize_score_number(earned_points)
+        detail["gradingFormula"] = normalized_formula
+
+        summary["possiblePoints"] += points
+        summary["correctPoints"] += correct_points
+        summary["penaltyPoints"] += penalty_points
+        summary["earnedPoints"] += earned_points
+        if status in {"correct", "incorrect", "blank", "missing", "invalid"}:
+            summary[f"{status}Count"] += 1
+
+        objectives = detail.get("learningObjectives")
+        if not isinstance(objectives, list):
+            objectives = []
+        for objective in objectives:
+            if not isinstance(objective, dict):
+                continue
+            objective_id = str(objective.get("id") or "").strip()
+            if not objective_id:
+                continue
+            label = str(objective.get("label") or objective_id).strip()
+            report = objective_reports.setdefault(
+                objective_id,
+                empty_objective_report_item(objective_id, label),
+            )
+            report["label"] = label or report["label"]
+            report["questionCount"] += 1
+            report["possiblePoints"] += points
+            report["correctPoints"] += correct_points
+            report["penaltyPoints"] += penalty_points
+            report["earnedPoints"] += earned_points
+            if status in {"correct", "incorrect", "blank", "missing", "invalid"}:
+                report[f"{status}Count"] += 1
+
+    finalized_summary = {
+        **summary,
+        "wrongCount": summary["incorrectCount"] + summary["invalidCount"],
+        "blankOrMissingCount": summary["blankCount"] + summary["missingCount"],
+        "gradingFormulaDescription": normalized_formula["description"],
+    }
+    for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+        finalized_summary[key] = normalize_score_number(float(finalized_summary[key]))
+
+    row["summary"] = finalized_summary
+    row["gradingFormula"] = normalized_formula
+    row["learningObjectiveSummary"] = [
+        finalize_objective_report_item(objective_reports[objective_id])
+        for objective_id in sorted(objective_reports)
+    ]
+    return row
+
+
+def build_grading_report(rows: list[dict[str, Any]], formula: dict[str, Any]) -> dict[str, Any]:
+    normalized_formula = grading_formula_with_description(formula)
+    total = {
+        "studentCount": len(rows),
+        "knownStudentCount": sum(1 for row in rows if row.get("studentId")),
+        "possiblePoints": 0.0,
+        "correctPoints": 0.0,
+        "penaltyPoints": 0.0,
+        "earnedPoints": 0.0,
+        "correctCount": 0,
+        "incorrectCount": 0,
+        "blankCount": 0,
+        "missingCount": 0,
+        "invalidCount": 0,
+    }
+    objective_reports: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+        for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+            total[key] += float(summary.get(key) or 0)
+        for key in ("correctCount", "incorrectCount", "blankCount", "missingCount", "invalidCount"):
+            total[key] += int(summary.get(key) or 0)
+        for objective in row.get("learningObjectiveSummary", []):
+            if not isinstance(objective, dict):
+                continue
+            objective_id = str(objective.get("id") or "").strip()
+            if not objective_id:
+                continue
+            report = objective_reports.setdefault(
+                objective_id,
+                empty_objective_report_item(objective_id, str(objective.get("label") or objective_id)),
+            )
+            report["label"] = str(objective.get("label") or report["label"])
+            report["questionCount"] += int(objective.get("questionCount") or 0)
+            for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+                report[key] += float(objective.get(key) or 0)
+            for key in ("correctCount", "incorrectCount", "blankCount", "missingCount", "invalidCount"):
+                report[key] += int(objective.get(key) or 0)
+
+    total["wrongCount"] = total["incorrectCount"] + total["invalidCount"]
+    total["blankOrMissingCount"] = total["blankCount"] + total["missingCount"]
+    for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+        total[key] = normalize_score_number(float(total[key]))
+
+    return {
+        "gradingFormula": normalized_formula,
+        "total": total,
+        "learningObjectives": [
+            finalize_objective_report_item(objective_reports[objective_id])
+            for objective_id in sorted(objective_reports)
+        ],
+    }
+
+
+def recalculate_grading_result(
+    result: dict[str, Any],
+    formula: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_formula = grading_formula_with_description(formula)
+    rows = [row for row in result.get("rows", []) if isinstance(row, dict)]
+    for row in rows:
+        recalculate_grading_row(row, normalized_formula)
+    result["rows"] = rows
+    result["gradingFormula"] = normalized_formula
+    result["report"] = build_grading_report(rows, normalized_formula)
+    summary = result.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    summary.update(
+        {
+            "totalEarnedPoints": result["report"]["total"]["earnedPoints"],
+            "totalPossiblePoints": result["report"]["total"]["possiblePoints"],
+            "totalCorrectCount": result["report"]["total"]["correctCount"],
+            "totalWrongCount": result["report"]["total"]["wrongCount"],
+        }
+    )
+    result["summary"] = summary
+    return result
+
+
 def analyze_grade_result(
     result: dict[str, Any],
     variant_lookup: dict[str, tuple[dict[str, Any], dict[str, Any]]],
+    grading_formula: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_pdf = str(result.get("source_pdf") or "")
     student_id = str(result.get("student_id") or "").strip()
@@ -1970,6 +2338,12 @@ def analyze_grade_result(
                     "position": position,
                     "prompt": str(question.get("question") or ""),
                     "imageAssetIds": question_image_asset_ids(question),
+                    "learningObjectiveIds": [
+                        objective_id
+                        for objective_id in question.get("learningObjectiveIds", [])
+                        if isinstance(objective_id, str) and objective_id.strip()
+                    ],
+                    "learningObjectives": question_learning_objectives(question),
                     "allowedChoices": allowed,
                     "correctAnswers": correct,
                     "markedAnswers": marked if marked is not None else [],
@@ -1990,7 +2364,7 @@ def analyze_grade_result(
     else:
         row_status = "ok"
 
-    return {
+    row = {
         "sourcePdf": source_pdf,
         "studentId": student_id,
         "displayStudentId": student_id or "Unknown",
@@ -2007,9 +2381,15 @@ def analyze_grade_result(
         "summary": summary,
         "questionDetails": question_details,
     }
+    recalculate_grading_row(row, grading_formula or grading_formula_with_description())
+    return row
 
 
-def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
+def grade_exam_pdfs(
+    state: AppState,
+    input_path: Path,
+    grading_formula: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if not input_path.exists():
         raise ValueError(f"Input path not found: {input_path}")
     if input_path.is_file() and input_path.suffix.lower() != ".pdf":
@@ -2019,8 +2399,12 @@ def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
 
     store = load_active_exam_store(state)
     variant_lookup = build_variant_lookup(store)
+    normalized_formula = grading_formula_with_description(grading_formula)
     raw_results = run_omr_grade(input_path)
-    rows = [analyze_grade_result(result, variant_lookup) for result in raw_results]
+    rows = [
+        analyze_grade_result(result, variant_lookup, normalized_formula)
+        for result in raw_results
+    ]
     duplicate_student_rows: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         student_id = row["studentId"]
@@ -2050,10 +2434,14 @@ def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
     for index, row in enumerate(rows, start=1):
         row["rowIndex"] = index
 
-    return {
+    result = {
+        "gradingRunId": str(uuid4()),
+        "gradedAt": utc_timestamp(),
         "inputPath": str(input_path),
+        "sourceBasePath": str(input_path if input_path.is_dir() else input_path.parent),
         "examStorePath": str(state.project_path),
         "projectPath": str(state.project_path),
+        "gradingFormula": normalized_formula,
         "rows": rows,
         "summary": {
             "processedCount": len(rows),
@@ -2063,15 +2451,196 @@ def grade_exam_pdfs(state: AppState, input_path: Path) -> dict[str, Any]:
             "mismatchCount": sum(1 for row in rows if row["hasMismatch"]),
         },
     }
+    return recalculate_grading_result(result, normalized_formula)
 
 
-def grade_uploaded_exam_pdfs(state: AppState, uploads: list[UploadedFile]) -> dict[str, Any]:
+def grade_uploaded_exam_pdfs(
+    state: AppState,
+    uploads: list[UploadedFile],
+    grading_formula: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     input_path = replace_grading_uploads(state, uploads)
-    result = grade_exam_pdfs(state, input_path)
+    result = grade_exam_pdfs(state, input_path, grading_formula)
+    result["sourceBasePath"] = str(input_path)
     result["inputPath"] = grading_upload_label(state.grading_upload_files)
     result["inputKind"] = "upload"
     result["uploadedFiles"] = state.grading_upload_files
     return result
+
+
+def build_grading_run_summary(result: dict[str, Any]) -> dict[str, Any]:
+    report = result.get("report") if isinstance(result.get("report"), dict) else {}
+    total = report.get("total") if isinstance(report.get("total"), dict) else {}
+    formula = grading_formula_with_description(
+        result.get("gradingFormula") if isinstance(result.get("gradingFormula"), dict) else None
+    )
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    return {
+        "gradingRunId": str(result.get("gradingRunId") or ""),
+        "gradedAt": str(result.get("gradedAt") or ""),
+        "updatedAt": str(result.get("updatedAt") or result.get("gradedAt") or ""),
+        "inputPath": str(result.get("inputPath") or ""),
+        "inputKind": str(result.get("inputKind") or "server-path"),
+        "gradingFormula": formula,
+        "formulaDescription": formula["description"],
+        "processedCount": int(summary.get("processedCount") or len(result.get("rows", []))),
+        "knownStudentCount": int(summary.get("knownStudentCount") or 0),
+        "mismatchCount": int(summary.get("mismatchCount") or 0),
+        "omrErrorCount": int(summary.get("omrErrorCount") or 0),
+        "earnedPoints": total.get("earnedPoints", 0),
+        "possiblePoints": total.get("possiblePoints", 0),
+        "correctCount": int(total.get("correctCount") or 0),
+        "wrongCount": int(total.get("wrongCount") or 0),
+    }
+
+
+def upsert_project_grading_run(path: Path, grading_result: dict[str, Any]) -> dict[str, Any]:
+    initialize_project_db(path)
+    grading_run_id = str(grading_result.get("gradingRunId") or uuid4()).strip()
+    if not grading_run_id:
+        raise ValueError("Grading run is missing gradingRunId")
+    graded_at = str(grading_result.get("gradedAt") or utc_timestamp())
+    now = utc_timestamp()
+    grading_result["gradingRunId"] = grading_run_id
+    grading_result["gradedAt"] = graded_at
+    grading_result["updatedAt"] = now
+    recalculate_grading_result(
+        grading_result,
+        grading_result.get("gradingFormula") if isinstance(grading_result.get("gradingFormula"), dict) else None,
+    )
+    document = json.dumps(grading_result, ensure_ascii=False)
+    with connect_project(path) as connection:
+        connection.execute(
+            """
+            INSERT INTO grading_runs (grading_run_id, graded_at, updated_at, document)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(grading_run_id) DO UPDATE SET
+              graded_at = excluded.graded_at,
+              updated_at = excluded.updated_at,
+              document = excluded.document
+            """,
+            (grading_run_id, graded_at, now, document),
+        )
+        connection.execute(
+            """
+            INSERT INTO project_meta (key, value)
+            VALUES ('updatedAt', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (now,),
+        )
+    return grading_result
+
+
+def load_project_grading_runs(path: Path) -> list[dict[str, Any]]:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        rows = connection.execute(
+            "SELECT document FROM grading_runs ORDER BY graded_at DESC"
+        ).fetchall()
+    summaries: list[dict[str, Any]] = []
+    for row in rows:
+        payload = json.loads(str(row["document"]))
+        if isinstance(payload, dict):
+            summaries.append(build_grading_run_summary(payload))
+    return summaries
+
+
+def find_project_grading_run(path: Path, grading_run_id: str) -> dict[str, Any] | None:
+    initialize_project_db(path)
+    with connect_project(path) as connection:
+        row = connection.execute(
+            "SELECT document FROM grading_runs WHERE grading_run_id = ?",
+            (grading_run_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    payload = json.loads(str(row["document"]))
+    return payload if isinstance(payload, dict) else None
+
+
+def update_project_grading_run_formula(
+    path: Path,
+    grading_run_id: str,
+    grading_formula: dict[str, Any],
+) -> dict[str, Any] | None:
+    grading_run = find_project_grading_run(path, grading_run_id)
+    if grading_run is None:
+        return None
+    recalculate_grading_result(grading_run, grading_formula)
+    return upsert_project_grading_run(path, grading_run)
+
+
+def append_active_grading_run(state: AppState, grading_result: dict[str, Any]) -> dict[str, Any]:
+    return upsert_project_grading_run(state.project_path, grading_result)
+
+
+def list_active_grading_runs(state: AppState) -> list[dict[str, Any]]:
+    return load_project_grading_runs(state.project_path)
+
+
+def find_active_grading_run(state: AppState, grading_run_id: str) -> dict[str, Any] | None:
+    return find_project_grading_run(state.project_path, grading_run_id)
+
+
+def update_active_grading_run_formula(
+    state: AppState,
+    grading_run_id: str,
+    grading_formula: dict[str, Any],
+) -> dict[str, Any] | None:
+    return update_project_grading_run_formula(
+        state.project_path,
+        grading_run_id,
+        grading_formula,
+    )
+
+
+def find_grading_run_row(grading_run: dict[str, Any], row_index: int) -> dict[str, Any] | None:
+    for row in grading_run.get("rows", []):
+        if isinstance(row, dict) and row.get("rowIndex") == row_index:
+            return row
+    return None
+
+
+def resolve_grading_source_pdf_path(
+    state: AppState,
+    grading_run: dict[str, Any],
+    row_index: int,
+) -> Path:
+    row = find_grading_run_row(grading_run, row_index)
+    if row is None:
+        raise ValueError("Grading row not found")
+
+    raw_source_pdf = str(row.get("sourcePdf") or "").strip()
+    if not raw_source_pdf:
+        raise ValueError("Grading row does not include a source PDF")
+    source_pdf = sanitize_upload_filename(raw_source_pdf, default_name="source.pdf")
+
+    input_kind = str(grading_run.get("inputKind") or "server-path")
+    if input_kind == "upload" and state.grading_upload_path is not None:
+        upload_candidate = (state.grading_upload_path / source_pdf).resolve()
+        if upload_candidate.is_file():
+            return upload_candidate
+
+    source_base = str(grading_run.get("sourceBasePath") or "").strip()
+    if source_base:
+        base_candidate = Path(source_base).expanduser().resolve()
+        if base_candidate.is_file():
+            return base_candidate
+        source_candidate = (base_candidate / source_pdf).resolve()
+        if source_candidate.is_file():
+            return source_candidate
+
+    input_path_raw = str(grading_run.get("inputPath") or "").strip()
+    if input_kind != "upload" and input_path_raw:
+        input_path = Path(input_path_raw).expanduser().resolve()
+        if input_path.is_file():
+            return input_path
+        source_candidate = (input_path / source_pdf).resolve()
+        if source_candidate.is_file():
+            return source_candidate
+
+    raise ValueError("The graded source PDF is no longer available on this server.")
 
 
 def build_annotation_answer_key(row: dict[str, Any]) -> dict[str, list[str]]:
@@ -2207,7 +2776,7 @@ def unrank_permutation(items: list[Any], rank: int) -> list[Any]:
     return result
 
 
-def sample_unique_ranks(total: int, count: int, rng: random.SystemRandom) -> list[int]:
+def sample_unique_ranks(total: int, count: int, rng: random.Random) -> list[int]:
     if total <= 50000 and count > total // 3:
         pool = list(range(total))
         rng.shuffle(pool)
@@ -2273,6 +2842,11 @@ def build_exam_set_summary(exam_set: dict[str, Any]) -> dict[str, Any]:
     return {
         "examSetId": str(exam_set.get("examSetId") or ""),
         "generatedAt": str(exam_set.get("generatedAt") or ""),
+        "generationSeed": str(
+            exam_set.get("generationSeed")
+            or selection.get("generationSeed")
+            or ""
+        ),
         "quiz": exam_set.get("quiz", {}),
         "printSettings": print_settings,
         "selectedQuestionCount": len(selection.get("selectedQuestionIds", [])),
@@ -2579,7 +3153,9 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
     ]
     remaining_slots = request["questionCount"] - len(forced_questions)
 
-    rng = random.SystemRandom()
+    generation_seed = request["generationSeed"] or random_generation_seed()
+    rng = random.Random()
+    rng.seed(generation_seed, version=2)
     sampled_questions = rng.sample(remaining_candidates, remaining_slots)
     selected_question_ids = {question["id"] for question in forced_questions + sampled_questions}
     selected_questions = [
@@ -2587,9 +3163,9 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
     ]
 
     shuffleable_questions = [question for question in selected_questions if question["shuffleChoices"]]
-    max_unique_variants = math.factorial(len(selected_questions)) * (
-        math.factorial(4) ** len(shuffleable_questions)
-    )
+    max_unique_variants = math.factorial(len(selected_questions))
+    for question in shuffleable_questions:
+        max_unique_variants *= math.factorial(len(question["choices"]))
     if request["variantCount"] > max_unique_variants:
         raise ValueError(
             f"Requested {request['variantCount']} unique variants, but the selected exam set only supports "
@@ -2614,6 +3190,7 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
     return {
         "examSetId": exam_set_id,
         "generatedAt": generated_at,
+        "generationSeed": generation_seed,
         "quiz": {
             "title": quiz.get("title", ""),
             "description": quiz.get("description", ""),
@@ -2647,6 +3224,7 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
             "availableQuestionIds": [question["id"] for question in available_questions],
             "selectedQuestionIds": [question["id"] for question in selected_questions],
             "maxUniqueVariants": str(max_unique_variants),
+            "generationSeed": generation_seed,
         },
         "questionPool": [
             build_question_pool_entry(question, objective_labels) for question in selected_questions
@@ -3997,8 +4575,17 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/exams":
                 self.handle_list_exam_sets()
                 return
+            if parsed.path == "/api/gradings":
+                self.handle_list_grading_runs()
+                return
             if parsed.path.startswith("/api/assets/"):
                 self.handle_get_asset(parsed.path)
+                return
+            if parsed.path.startswith("/api/gradings/source/"):
+                self.handle_get_grading_source_pdf(parsed.path)
+                return
+            if parsed.path.startswith("/api/gradings/run/"):
+                self.handle_get_grading_run(parsed.path)
                 return
             if parsed.path.startswith("/api/exams/set/"):
                 self.handle_get_exam_set(parsed.path)
@@ -4024,6 +4611,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path.startswith("/api/exams/set/") and parsed.path.endswith("/print-settings"):
                 self.handle_update_exam_set_print_settings(parsed.path)
+                return
+            if parsed.path.startswith("/api/gradings/run/") and parsed.path.endswith("/formula"):
+                self.handle_update_grading_run_formula(parsed.path)
                 return
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
@@ -4103,6 +4693,16 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return parse_multipart_uploads(self.headers.get("Content-Type", ""), raw_body), []
             except ValueError as error:
                 return [], [{"path": "<upload>", "message": str(error)}]
+
+        def read_grading_formula_header(self) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+            raw_formula = self.headers.get("X-Quiz-Pool-Grading-Formula", "").strip()
+            if not raw_formula:
+                return grading_formula_with_description(), []
+            try:
+                payload = json.loads(raw_formula)
+            except json.JSONDecodeError as error:
+                return None, [{"path": "gradingFormula", "message": f"Invalid grading formula JSON: {error.msg}"}]
+            return normalize_grading_formula_payload(payload)
 
         def session_payload(self, *, ok: bool = True) -> dict[str, Any]:
             return {
@@ -4368,6 +4968,121 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 }
             )
 
+        def handle_list_grading_runs(self) -> None:
+            try:
+                summaries = list_active_grading_runs(state)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<gradings>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_json(
+                {
+                    "projectPath": str(state.project_path),
+                    "gradingRuns": summaries,
+                }
+            )
+
+        def handle_get_grading_run(self, path: str) -> None:
+            grading_run_id = unquote(path.removeprefix("/api/gradings/run/")).strip()
+            if not grading_run_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
+                return
+
+            try:
+                grading_run = find_active_grading_run(state, grading_run_id)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<gradings>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            if grading_run is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
+                return
+
+            self.send_json(
+                {
+                    "projectPath": str(state.project_path),
+                    "summary": build_grading_run_summary(grading_run),
+                    "gradingRun": grading_run,
+                }
+            )
+
+        def handle_update_grading_run_formula(self, path: str) -> None:
+            suffix = "/formula"
+            grading_run_id = unquote(path.removeprefix("/api/gradings/run/").removesuffix(suffix)).strip()
+            if not grading_run_id:
+                self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
+                return
+
+            payload, body_errors = self.read_json_body()
+            if body_errors:
+                self.send_json({"ok": False, "errors": body_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            formula, formula_errors = normalize_grading_formula_payload(
+                payload.get("gradingFormula", payload.get("formula", payload))
+            )
+            if formula_errors or formula is None:
+                self.send_json({"ok": False, "errors": formula_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            try:
+                grading_run = update_active_grading_run_formula(state, grading_run_id, formula)
+            except ValueError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<gradings>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            if grading_run is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
+                return
+
+            self.send_json(
+                {
+                    "ok": True,
+                    "summary": build_grading_run_summary(grading_run),
+                    "gradingRun": grading_run,
+                }
+            )
+
+        def handle_get_grading_source_pdf(self, path: str) -> None:
+            relative = path.removeprefix("/api/gradings/source/").removesuffix(".pdf")
+            parts = [unquote(part).strip() for part in relative.split("/") if part.strip()]
+            if len(parts) != 2:
+                self.send_error(HTTPStatus.NOT_FOUND, "Graded PDF not found")
+                return
+            grading_run_id, raw_row_index = parts
+            try:
+                row_index = int(raw_row_index)
+            except ValueError:
+                self.send_error(HTTPStatus.NOT_FOUND, "Graded PDF not found")
+                return
+
+            grading_run = find_active_grading_run(state, grading_run_id)
+            if grading_run is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
+                return
+            try:
+                source_path = resolve_grading_source_pdf_path(state, grading_run, row_index)
+            except ValueError as error:
+                self.send_json(
+                    {"errors": [{"path": "<sourcePdf>", "message": str(error)}]},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            self.send_blob(
+                source_path.read_bytes(),
+                content_type="application/pdf",
+                filename=source_path.name,
+            )
+
         def handle_get_exam_set(self, path: str) -> None:
             exam_set_id = unquote(path.removeprefix("/api/exams/set/")).strip()
             if not exam_set_id:
@@ -4402,6 +5117,11 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     "examSet": {
                         "examSetId": exam_set["examSetId"],
                         "generatedAt": exam_set["generatedAt"],
+                        "generationSeed": str(
+                            exam_set.get("generationSeed")
+                            or exam_set.get("selection", {}).get("generationSeed")
+                            or ""
+                        ),
                         "quiz": exam_set["quiz"],
                         "printSettings": get_print_settings(exam_set),
                         "selection": exam_set["selection"],
@@ -4509,6 +5229,11 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                     "projectPath": str(state.project_path),
                     "examSetId": exam_set["examSetId"],
                     "generatedAt": exam_set["generatedAt"],
+                    "generationSeed": str(
+                        exam_set.get("generationSeed")
+                        or exam_set.get("selection", {}).get("generationSeed")
+                        or ""
+                    ),
                     "quiz": exam_set["quiz"],
                     "printSettings": get_print_settings(exam_set),
                     "selection": exam_set["selection"],
@@ -4658,9 +5383,10 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             input_path = Path(request["inputPath"]).expanduser().resolve()
             try:
-                result = grade_exam_pdfs(state, input_path)
+                result = grade_exam_pdfs(state, input_path, request["gradingFormula"])
                 clear_grading_uploads(state)
                 result["inputKind"] = "server-path"
+                result = append_active_grading_run(state, result)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<grading>", "message": str(error)}]},
@@ -4677,6 +5403,11 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             self.send_json(result)
 
         def handle_grade_uploaded_exams(self) -> None:
+            grading_formula, formula_errors = self.read_grading_formula_header()
+            if formula_errors or grading_formula is None:
+                self.send_json({"errors": formula_errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+
             uploads, upload_errors = self.read_upload_body()
             if upload_errors:
                 self.send_json({"errors": upload_errors}, status=HTTPStatus.BAD_REQUEST)
@@ -4684,7 +5415,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             pdf_uploads = [upload for upload in uploads if upload.field_name in {"pdfs", "files"}]
             try:
-                result = grade_uploaded_exam_pdfs(state, pdf_uploads)
+                result = grade_uploaded_exam_pdfs(state, pdf_uploads, grading_formula)
+                result = append_active_grading_run(state, result)
             except ValueError as error:
                 self.send_json(
                     {"errors": [{"path": "<grading>", "message": str(error)}]},

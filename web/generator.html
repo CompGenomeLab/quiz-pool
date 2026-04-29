@@ -69,6 +69,10 @@
               <span>Unique Variants</span>
               <input id="variant-count" type="number" min="1" step="1" />
             </label>
+            <label class="field field--full">
+              <span>Seed</span>
+              <input id="generation-seed" type="text" maxlength="128" placeholder="Random if blank" />
+            </label>
           </div>
 
           <div class="summary-grid">
@@ -184,6 +188,10 @@
                 <div class="metric">
                   <span class="metric__label">Generated At</span>
                   <span id="result-generated-at" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Seed</span>
+                  <span id="result-generation-seed" class="metric__value"></span>
                 </div>
                 <div class="metric">
                   <span class="metric__label">Selected Questions</span>
