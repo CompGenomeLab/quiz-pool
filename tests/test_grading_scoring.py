@@ -2,6 +2,7 @@ import unittest
 
 from src.quiz_pool.main import (
     analyze_grade_result,
+    build_grading_report,
     earns_full_credit,
     normalize_grading_formula_payload,
     recalculate_grading_row,
@@ -31,6 +32,9 @@ class GradingFormulaTests(unittest.TestCase):
         self.assertEqual(row["summary"]["earnedPoints"], 2)
         self.assertEqual(row["summary"]["penaltyPoints"], 0)
         self.assertEqual(row["summary"]["wrongCount"], 2)
+        self.assertEqual(row["summary"]["questionCount"], 4)
+        self.assertEqual(row["summary"]["scorePercent"], 33.333333)
+        self.assertEqual(row["summary"]["wrongPercent"], 50)
 
     def test_fixed_wrong_answer_penalty_subtracts_per_wrong_or_invalid_answer(self) -> None:
         formula, errors = normalize_grading_formula_payload(
@@ -42,7 +46,11 @@ class GradingFormulaTests(unittest.TestCase):
         self.assertEqual(row["summary"]["earnedPoints"], 1.5)
         self.assertEqual(row["summary"]["penaltyPoints"], 0.5)
         self.assertEqual(row["learningObjectiveSummary"][0]["earnedPoints"], 1.75)
-        self.assertEqual(row["learningObjectiveSummary"][1]["earnedPoints"], -0.25)
+        self.assertEqual(row["learningObjectiveSummary"][1]["earnedPoints"], 0)
+        self.assertEqual(row["learningObjectiveSummary"][0]["scorePercent"], 43.75)
+        self.assertEqual(row["learningObjectiveSummary"][0]["wrongPercent"], 50)
+        self.assertEqual(row["learningObjectiveSummary"][1]["scorePercent"], 0)
+        self.assertEqual(row["learningObjectiveSummary"][1]["blankOrMissingPercent"], 50)
 
     def test_choice_weighted_penalty_uses_question_points_and_choice_count(self) -> None:
         formula, errors = normalize_grading_formula_payload({"mode": "choice_weighted"})
@@ -51,6 +59,30 @@ class GradingFormulaTests(unittest.TestCase):
 
         self.assertEqual(row["summary"]["earnedPoints"], 0.833333)
         self.assertEqual(row["summary"]["penaltyPoints"], 1.166667)
+
+    def test_penalties_do_not_make_scores_negative(self) -> None:
+        formula, errors = normalize_grading_formula_payload(
+            {"mode": "fixed", "wrongPenalty": 5}
+        )
+        self.assertEqual(errors, [])
+        row = recalculate_grading_row(sample_scoring_row(), formula)
+
+        self.assertEqual(row["summary"]["earnedPoints"], 0)
+        self.assertEqual(row["summary"]["scorePercent"], 0)
+        self.assertEqual(row["learningObjectiveSummary"][1]["earnedPoints"], 0)
+        self.assertEqual(row["questionDetails"][1]["earnedPoints"], 0)
+        self.assertEqual(row["questionDetails"][2]["earnedPoints"], 0)
+
+    def test_grading_report_totals_include_normalized_percentages(self) -> None:
+        formula, errors = normalize_grading_formula_payload(None)
+        self.assertEqual(errors, [])
+        row = recalculate_grading_row(sample_scoring_row(), formula)
+        report = build_grading_report([row], formula)
+
+        self.assertEqual(report["total"]["questionCount"], 4)
+        self.assertEqual(report["total"]["scorePercent"], 33.333333)
+        self.assertEqual(report["total"]["wrongPercent"], 50)
+        self.assertEqual(report["learningObjectives"][0]["correctPercent"], 50)
 
     def test_grading_objectives_are_read_from_matched_variant_question(self) -> None:
         exam_set = {

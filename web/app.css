@@ -318,14 +318,14 @@ textarea {
 
 .grading-detail-modal__panel {
   border-radius: 22px;
-  bottom: 24px;
+  bottom: 16px;
   left: auto;
   max-height: none;
-  max-width: min(1180px, calc(100vw - 48px));
-  right: 24px;
-  top: 24px;
+  max-width: min(1520px, calc(100vw - 24px));
+  right: 12px;
+  top: 16px;
   transform: translateX(26px);
-  width: min(1180px, calc(100vw - 48px));
+  width: min(1520px, calc(100vw - 24px));
 }
 
 .grading-detail-modal__top {
@@ -953,7 +953,7 @@ textarea {
 }
 
 .grading-table {
-  min-width: 1360px;
+  min-width: 1580px;
 }
 
 .grading-table__row.is-selected td {
@@ -1022,11 +1022,11 @@ textarea {
 }
 
 .grading-question-table {
-  min-width: 1080px;
+  min-width: 1220px;
 }
 
 .objective-report-table {
-  min-width: 860px;
+  min-width: 1040px;
 }
 
 .objective-chip-list {

@@ -1592,6 +1592,16 @@ def normalize_score_number(value: float) -> int | float:
     return round(value, 6)
 
 
+def normalize_percent(numerator: float, denominator: float) -> int | float:
+    if denominator <= 0:
+        return 0
+    return normalize_score_number((numerator / denominator) * 100)
+
+
+def nonnegative_score_number(value: float) -> int | float:
+    return normalize_score_number(max(0.0, value))
+
+
 def grading_formula_description(formula: dict[str, Any]) -> str:
     mode = str(formula.get("mode") or DEFAULT_GRADING_FORMULA_MODE)
     if mode == "fixed":
@@ -2069,9 +2079,29 @@ def empty_objective_report_item(objective_id: str, label: str) -> dict[str, Any]
 
 def finalize_objective_report_item(item: dict[str, Any]) -> dict[str, Any]:
     finalized = dict(item)
-    for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+    for key in ("possiblePoints", "correctPoints", "penaltyPoints"):
         finalized[key] = normalize_score_number(float(finalized.get(key) or 0))
+    finalized["earnedPoints"] = nonnegative_score_number(float(finalized.get("earnedPoints") or 0))
+    question_count = int(finalized.get("questionCount") or 0)
+    finalized["questionCount"] = question_count
     finalized["wrongCount"] = int(finalized.get("incorrectCount") or 0) + int(finalized.get("invalidCount") or 0)
+    finalized["blankOrMissingCount"] = int(finalized.get("blankCount") or 0) + int(finalized.get("missingCount") or 0)
+    finalized["scorePercent"] = normalize_percent(
+        float(finalized["earnedPoints"]),
+        float(finalized["possiblePoints"]),
+    )
+    finalized["correctPercent"] = normalize_percent(
+        float(finalized.get("correctCount") or 0),
+        float(question_count),
+    )
+    finalized["wrongPercent"] = normalize_percent(
+        float(finalized["wrongCount"]),
+        float(question_count),
+    )
+    finalized["blankOrMissingPercent"] = normalize_percent(
+        float(finalized["blankOrMissingCount"]),
+        float(question_count),
+    )
     return finalized
 
 
@@ -2108,7 +2138,7 @@ def recalculate_grading_row(row: dict[str, Any], formula: dict[str, Any]) -> dic
 
         detail["correctPoints"] = normalize_score_number(correct_points)
         detail["penaltyPoints"] = normalize_score_number(penalty_points)
-        detail["earnedPoints"] = normalize_score_number(earned_points)
+        detail["earnedPoints"] = nonnegative_score_number(earned_points)
         detail["gradingFormula"] = normalized_formula
 
         summary["possiblePoints"] += points
@@ -2143,12 +2173,38 @@ def recalculate_grading_row(row: dict[str, Any], formula: dict[str, Any]) -> dic
 
     finalized_summary = {
         **summary,
+        "questionCount": (
+            summary["correctCount"]
+            + summary["incorrectCount"]
+            + summary["blankCount"]
+            + summary["missingCount"]
+            + summary["invalidCount"]
+        ),
         "wrongCount": summary["incorrectCount"] + summary["invalidCount"],
         "blankOrMissingCount": summary["blankCount"] + summary["missingCount"],
         "gradingFormulaDescription": normalized_formula["description"],
     }
-    for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+    for key in ("possiblePoints", "correctPoints", "penaltyPoints"):
         finalized_summary[key] = normalize_score_number(float(finalized_summary[key]))
+    finalized_summary["earnedPoints"] = nonnegative_score_number(
+        float(finalized_summary["correctPoints"]) - float(finalized_summary["penaltyPoints"])
+    )
+    finalized_summary["scorePercent"] = normalize_percent(
+        float(finalized_summary["earnedPoints"]),
+        float(finalized_summary["possiblePoints"]),
+    )
+    finalized_summary["correctPercent"] = normalize_percent(
+        float(finalized_summary["correctCount"]),
+        float(finalized_summary["questionCount"]),
+    )
+    finalized_summary["wrongPercent"] = normalize_percent(
+        float(finalized_summary["wrongCount"]),
+        float(finalized_summary["questionCount"]),
+    )
+    finalized_summary["blankOrMissingPercent"] = normalize_percent(
+        float(finalized_summary["blankOrMissingCount"]),
+        float(finalized_summary["questionCount"]),
+    )
 
     row["summary"] = finalized_summary
     row["gradingFormula"] = normalized_formula
@@ -2200,8 +2256,32 @@ def build_grading_report(rows: list[dict[str, Any]], formula: dict[str, Any]) ->
 
     total["wrongCount"] = total["incorrectCount"] + total["invalidCount"]
     total["blankOrMissingCount"] = total["blankCount"] + total["missingCount"]
-    for key in ("possiblePoints", "correctPoints", "penaltyPoints", "earnedPoints"):
+    total["questionCount"] = (
+        total["correctCount"]
+        + total["incorrectCount"]
+        + total["blankCount"]
+        + total["missingCount"]
+        + total["invalidCount"]
+    )
+    for key in ("possiblePoints", "correctPoints", "penaltyPoints"):
         total[key] = normalize_score_number(float(total[key]))
+    total["earnedPoints"] = nonnegative_score_number(float(total["earnedPoints"]))
+    total["scorePercent"] = normalize_percent(
+        float(total["earnedPoints"]),
+        float(total["possiblePoints"]),
+    )
+    total["correctPercent"] = normalize_percent(
+        float(total["correctCount"]),
+        float(total["questionCount"]),
+    )
+    total["wrongPercent"] = normalize_percent(
+        float(total["wrongCount"]),
+        float(total["questionCount"]),
+    )
+    total["blankOrMissingPercent"] = normalize_percent(
+        float(total["blankOrMissingCount"]),
+        float(total["questionCount"]),
+    )
 
     return {
         "gradingFormula": normalized_formula,
@@ -2229,10 +2309,21 @@ def recalculate_grading_result(
         summary = {}
     summary.update(
         {
+            "processedCount": len(rows),
+            "knownStudentCount": sum(1 for row in rows if row.get("studentId")),
+            "mismatchCount": sum(1 for row in rows if row.get("hasMismatch")),
+            "mismatchPercent": normalize_percent(
+                float(sum(1 for row in rows if row.get("hasMismatch"))),
+                float(len(rows)),
+            ),
             "totalEarnedPoints": result["report"]["total"]["earnedPoints"],
             "totalPossiblePoints": result["report"]["total"]["possiblePoints"],
+            "totalScorePercent": result["report"]["total"]["scorePercent"],
             "totalCorrectCount": result["report"]["total"]["correctCount"],
+            "totalCorrectPercent": result["report"]["total"]["correctPercent"],
             "totalWrongCount": result["report"]["total"]["wrongCount"],
+            "totalWrongPercent": result["report"]["total"]["wrongPercent"],
+            "totalQuestionCount": result["report"]["total"]["questionCount"],
         }
     )
     result["summary"] = summary
@@ -2496,6 +2587,22 @@ def build_grading_run_summary(result: dict[str, Any]) -> dict[str, Any]:
         result.get("gradingFormula") if isinstance(result.get("gradingFormula"), dict) else None
     )
     summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    processed_count = int(summary.get("processedCount") or len(result.get("rows", [])))
+    question_count = int(
+        total.get("questionCount")
+        or (
+            int(total.get("correctCount") or 0)
+            + int(total.get("incorrectCount") or 0)
+            + int(total.get("blankCount") or 0)
+            + int(total.get("missingCount") or 0)
+            + int(total.get("invalidCount") or 0)
+        )
+    )
+    mismatch_count = int(summary.get("mismatchCount") or 0)
+    earned_points = float(total.get("earnedPoints") or 0)
+    possible_points = float(total.get("possiblePoints") or 0)
+    correct_count = int(total.get("correctCount") or 0)
+    wrong_count = int(total.get("wrongCount") or 0)
     return {
         "gradingRunId": str(result.get("gradingRunId") or ""),
         "gradedAt": str(result.get("gradedAt") or ""),
@@ -2504,14 +2611,22 @@ def build_grading_run_summary(result: dict[str, Any]) -> dict[str, Any]:
         "inputKind": str(result.get("inputKind") or "server-path"),
         "gradingFormula": formula,
         "formulaDescription": formula["description"],
-        "processedCount": int(summary.get("processedCount") or len(result.get("rows", []))),
+        "processedCount": processed_count,
         "knownStudentCount": int(summary.get("knownStudentCount") or 0),
-        "mismatchCount": int(summary.get("mismatchCount") or 0),
+        "mismatchCount": mismatch_count,
+        "mismatchPercent": summary.get(
+            "mismatchPercent",
+            normalize_percent(float(mismatch_count), float(processed_count)),
+        ),
         "omrErrorCount": int(summary.get("omrErrorCount") or 0),
         "earnedPoints": total.get("earnedPoints", 0),
         "possiblePoints": total.get("possiblePoints", 0),
-        "correctCount": int(total.get("correctCount") or 0),
-        "wrongCount": int(total.get("wrongCount") or 0),
+        "scorePercent": total.get("scorePercent", normalize_percent(earned_points, possible_points)),
+        "correctCount": correct_count,
+        "correctPercent": total.get("correctPercent", normalize_percent(float(correct_count), float(question_count))),
+        "wrongCount": wrong_count,
+        "wrongPercent": total.get("wrongPercent", normalize_percent(float(wrong_count), float(question_count))),
+        "questionCount": question_count,
     }
 
 

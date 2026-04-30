@@ -186,7 +186,7 @@ class ProjectStorageTests(unittest.TestCase):
             self.assertEqual(summaries[0]["gradingRunId"], "grading-001")
             self.assertIsNotNone(updated)
             self.assertEqual(reloaded["gradingFormula"]["mode"], "fixed")
-            self.assertEqual(reloaded["report"]["total"]["earnedPoints"], -0.5)
+            self.assertEqual(reloaded["report"]["total"]["earnedPoints"], 0)
             self.assertTrue(deleted)
             self.assertIsNone(after_delete)
             self.assertFalse(missing_deleted)

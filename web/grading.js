@@ -39,6 +39,7 @@ const elements = {
   deleteGradingRun: document.querySelector("#delete-grading-run"),
   errorList: document.querySelector("#grading-error-list"),
   exportGradingCsv: document.querySelector("#export-grading-csv"),
+  exportObjectiveCsv: document.querySelector("#export-objective-csv"),
   errorPanel: document.querySelector("#grading-errors"),
   examStorePath: document.querySelector("#exam-store-path"),
   gradingHeading: document.querySelector("#grading-heading"),
@@ -215,6 +216,70 @@ function formatScore(value) {
   }).format(number);
 }
 
+function percentage(numerator, denominator) {
+  const top = Number(numerator ?? 0);
+  const bottom = Number(denominator ?? 0);
+  if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= 0) {
+    return 0;
+  }
+  return (top / bottom) * 100;
+}
+
+function formatPercent(value) {
+  return `${formatScore(value)}%`;
+}
+
+function scorePercent(item = {}) {
+  if (item.scorePercent !== undefined) {
+    return Number(item.scorePercent);
+  }
+  return percentage(item.earnedPoints, item.possiblePoints);
+}
+
+function questionCount(item = {}) {
+  if (item.questionCount !== undefined) {
+    return Number(item.questionCount);
+  }
+  return Number(item.correctCount ?? 0)
+    + Number(item.incorrectCount ?? 0)
+    + Number(item.blankCount ?? 0)
+    + Number(item.missingCount ?? 0)
+    + Number(item.invalidCount ?? 0);
+}
+
+function correctPercent(item = {}) {
+  if (item.correctPercent !== undefined) {
+    return Number(item.correctPercent);
+  }
+  return percentage(item.correctCount, questionCount(item));
+}
+
+function wrongPercent(item = {}) {
+  if (item.wrongPercent !== undefined) {
+    return Number(item.wrongPercent);
+  }
+  return percentage(item.wrongCount ?? item.incorrectCount, questionCount(item));
+}
+
+function blankMissingPercent(item = {}) {
+  if (item.blankOrMissingPercent !== undefined) {
+    return Number(item.blankOrMissingPercent);
+  }
+  return percentage(objectiveBlankMissingCount(item), questionCount(item));
+}
+
+function scoreWithPercent(item = {}) {
+  return `${formatPercent(scorePercent(item))} (${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)})`;
+}
+
+function countWithPercent(count, percent) {
+  return `${formatScore(count)} (${formatPercent(percent)})`;
+}
+
+function countRatioWithPercent(count, total, percent) {
+  return `${formatScore(count)}/${formatScore(total)} (${formatPercent(percent)})`;
+}
+
 function gradingFormulaDescription(formula = {}) {
   if (formula.description) {
     return formula.description;
@@ -258,8 +323,35 @@ function objectiveSummaryText(items = []) {
   }
   return items.map((item) => {
     const label = item.id ? `${item.id}` : "Objective";
-    return `${label}: ${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)} C${item.correctCount ?? 0} W${item.wrongCount ?? 0}`;
+    return `${label}: ${formatPercent(scorePercent(item))} (${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)}) C${item.correctCount ?? 0} (${formatPercent(correctPercent(item))}) W${item.wrongCount ?? 0} (${formatPercent(wrongPercent(item))})`;
   }).join(" | ");
+}
+
+function questionObjectiveText(question = {}) {
+  const objectives = Array.isArray(question.learningObjectives) ? question.learningObjectives : [];
+  const labels = objectives
+    .map((objective) => {
+      if (!objective || typeof objective !== "object") {
+        return "";
+      }
+      const id = String(objective.id || "").trim();
+      const label = String(objective.label || "").trim();
+      if (id && label && label !== id) {
+        return `${id} · ${label}`;
+      }
+      return id || label;
+    })
+    .filter(Boolean);
+  if (labels.length > 0) {
+    return labels.join(" | ");
+  }
+
+  const ids = Array.isArray(question.learningObjectiveIds)
+    ? question.learningObjectiveIds
+        .map((objectiveId) => String(objectiveId || "").trim())
+        .filter(Boolean)
+    : [];
+  return ids.length > 0 ? ids.join(" | ") : "—";
 }
 
 function objectiveBlankMissingCount(item = {}) {
@@ -302,16 +394,28 @@ function createObjectiveSummaryNode(items = []) {
 
     const score = createObjectiveMetric(
       "Score",
-      `${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)}`,
+      scoreWithPercent(item),
       "score",
     );
-    const correct = createObjectiveMetric("C", String(item.correctCount ?? 0), "correct");
-    const wrong = createObjectiveMetric("W", String(item.wrongCount ?? 0), "wrong");
+    const correct = createObjectiveMetric(
+      "C",
+      countWithPercent(item.correctCount ?? 0, correctPercent(item)),
+      "correct",
+    );
+    const wrong = createObjectiveMetric(
+      "W",
+      countWithPercent(item.wrongCount ?? 0, wrongPercent(item)),
+      "wrong",
+    );
     chip.append(name, score, correct, wrong);
 
     const blankMissing = objectiveBlankMissingCount(item);
     if (blankMissing > 0) {
-      chip.append(createObjectiveMetric("B/M", String(blankMissing), "blank"));
+      chip.append(createObjectiveMetric(
+        "B/M",
+        countWithPercent(blankMissing, blankMissingPercent(item)),
+        "blank",
+      ));
     }
 
     wrap.append(chip);
@@ -333,7 +437,7 @@ function createCompactObjectiveSummaryNode(items = []) {
   for (const item of items) {
     const chip = document.createElement("span");
     chip.className = "objective-compact-chip";
-    chip.title = `${item.id || "Objective"}: ${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)}; C${item.correctCount ?? 0}; W${item.wrongCount ?? 0}; B/M${objectiveBlankMissingCount(item)}`;
+    chip.title = `${item.id || "Objective"}: ${scoreWithPercent(item)}; C${countWithPercent(item.correctCount ?? 0, correctPercent(item))}; W${countWithPercent(item.wrongCount ?? 0, wrongPercent(item))}; B/M${countWithPercent(objectiveBlankMissingCount(item), blankMissingPercent(item))}`;
 
     const name = document.createElement("strong");
     name.className = "objective-compact-chip__name";
@@ -341,15 +445,15 @@ function createCompactObjectiveSummaryNode(items = []) {
 
     const score = document.createElement("span");
     score.className = "objective-compact-chip__score";
-    score.textContent = `${formatScore(item.earnedPoints)}/${formatScore(item.possiblePoints)}`;
+    score.textContent = formatPercent(scorePercent(item));
 
     const correct = document.createElement("span");
     correct.className = "objective-compact-chip__metric objective-compact-chip__metric--correct";
-    correct.textContent = `C${item.correctCount ?? 0}`;
+    correct.textContent = `C${formatPercent(correctPercent(item))}`;
 
     const wrong = document.createElement("span");
     wrong.className = "objective-compact-chip__metric objective-compact-chip__metric--wrong";
-    wrong.textContent = `W${item.wrongCount ?? 0}`;
+    wrong.textContent = `W${formatPercent(wrongPercent(item))}`;
 
     chip.append(name, score, correct, wrong);
 
@@ -357,7 +461,7 @@ function createCompactObjectiveSummaryNode(items = []) {
     if (blankMissing > 0) {
       const blank = document.createElement("span");
       blank.className = "objective-compact-chip__metric objective-compact-chip__metric--blank";
-      blank.textContent = `B${blankMissing}`;
+      blank.textContent = `B${formatPercent(blankMissingPercent(item))}`;
       chip.append(blank);
     }
 
@@ -390,6 +494,11 @@ function csvCell(value) {
 
 function scoreText(earnedPoints, possiblePoints) {
   return `${formatScore(earnedPoints)}/${formatScore(possiblePoints)}`;
+}
+
+function scoreTextWithPercent(earnedPoints, possiblePoints, percentValue) {
+  const percent = percentValue === undefined ? percentage(earnedPoints, possiblePoints) : percentValue;
+  return `${formatPercent(percent)} (${scoreText(earnedPoints, possiblePoints)})`;
 }
 
 function countText(...values) {
@@ -453,7 +562,7 @@ function setGradingFiles(files) {
 
 function gradingRunLabel(summary) {
   const when = summary.gradedAt ? new Date(summary.gradedAt).toLocaleString() : "Unknown time";
-  const score = `${formatScore(summary.earnedPoints)}/${formatScore(summary.possiblePoints)}`;
+  const score = scoreTextWithPercent(summary.earnedPoints, summary.possiblePoints, summary.scorePercent);
   return `${when} · ${summary.processedCount ?? 0} PDF(s) · ${score}`;
 }
 
@@ -519,34 +628,12 @@ function downloadGradingCsv() {
   }
 
   const rows = getSortedRows(state.results.rows);
-  const reportTotal = state.results.report?.total ?? {};
   const formulaDescription = gradingFormulaDescription(state.results.gradingFormula);
-  const objectiveColumns = (state.results.report?.learningObjectives ?? []).map((objective, index) => {
-    const id = String(objective.id || `Objective ${index + 1}`).trim();
-    return {
-      id,
-      label: String(objective.label || "").trim(),
-      report: objective,
-    };
-  });
-  const objectiveHeaders = objectiveColumns.flatMap((objective) => [
-    `${objective.id} Label`,
-    `${objective.id} Run Questions`,
-    `${objective.id} Run Score`,
-    `${objective.id} Score`,
-    `${objective.id} Correct`,
-    `${objective.id} Wrong`,
-    `${objective.id} Blank / Missing`,
-  ]);
   const header = [
     "Grading Run ID",
     "Graded At",
     "Input",
     "Formula",
-    "Run Processed PDFs",
-    "Run Total Score",
-    "Run Total Correct",
-    "Run Total Wrong",
     "Row",
     "Student ID",
     "Source PDF",
@@ -554,52 +641,35 @@ function downloadGradingCsv() {
     "Variant",
     "Detected Questions",
     "Variant Questions",
+    "Questions",
     "Score",
+    "Score Percent",
     "Earned Points",
     "Possible Points",
     "Correct",
+    "Correct Percent",
     "Wrong",
+    "Wrong Percent",
     "Blank",
     "Missing",
     "Blank / Missing",
+    "Blank / Missing Percent",
     "Invalid",
+    "Invalid Percent",
     "Penalty",
     "Status",
     "Issues",
     "Learning Objectives",
-    ...objectiveHeaders,
   ];
   const lines = [header.map(csvCell).join(",")];
 
   for (const row of (rows.length > 0 ? rows : [null])) {
     const summary = row?.summary ?? {};
-    const rowObjectives = new Map();
-    for (const objective of row?.learningObjectiveSummary ?? []) {
-      if (objective?.id) {
-        rowObjectives.set(String(objective.id), objective);
-      }
-    }
-    const objectiveValues = objectiveColumns.flatMap((objective) => {
-      const item = rowObjectives.get(objective.id);
-      return [
-        objective.label,
-        String(objective.report.questionCount ?? ""),
-        scoreText(objective.report.earnedPoints, objective.report.possiblePoints),
-        item ? scoreText(item.earnedPoints, item.possiblePoints) : "",
-        item ? String(item.correctCount ?? 0) : "",
-        item ? String(item.wrongCount ?? 0) : "",
-        item ? String(objectiveBlankMissingCount(item)) : "",
-      ];
-    });
     lines.push([
       state.results.gradingRunId || "",
       state.results.gradedAt || "",
       state.results.inputPath || "",
       formulaDescription,
-      String(state.results.summary?.processedCount ?? ""),
-      scoreText(reportTotal.earnedPoints, reportTotal.possiblePoints),
-      String(reportTotal.correctCount ?? 0),
-      String(reportTotal.wrongCount ?? 0),
       String(row?.rowIndex ?? ""),
       row?.displayStudentId || row?.studentId || "",
       row?.sourcePdf || "",
@@ -607,34 +677,100 @@ function downloadGradingCsv() {
       row?.variantId || "",
       String(row?.detectedQuestionCount ?? ""),
       String(row?.variantQuestionCount ?? ""),
+      row ? String(questionCount(summary)) : "",
       row ? scoreText(summary.earnedPoints, summary.possiblePoints) : "",
+      row ? formatScore(scorePercent(summary)) : "",
       row ? formatScore(summary.earnedPoints) : "",
       row ? formatScore(summary.possiblePoints) : "",
       row ? String(summary.correctCount ?? 0) : "",
+      row ? formatScore(correctPercent(summary)) : "",
       row ? String(summary.wrongCount ?? summary.incorrectCount ?? 0) : "",
+      row ? formatScore(wrongPercent(summary)) : "",
       row ? String(summary.blankCount ?? 0) : "",
       row ? String(summary.missingCount ?? 0) : "",
       row ? countText(summary.blankCount, summary.missingCount) : "",
+      row ? formatScore(blankMissingPercent(summary)) : "",
       row ? String(summary.invalidCount ?? 0) : "",
+      row ? formatScore(percentage(summary.invalidCount, questionCount(summary))) : "",
       row ? formatScore(summary.penaltyPoints) : "",
       row ? statusLabel(row) : "",
       row && Array.isArray(row.issues) ? row.issues.join(" | ") : "",
       row && Array.isArray(row.learningObjectiveSummary) && row.learningObjectiveSummary.length > 0
         ? objectiveSummaryText(row.learningObjectiveSummary)
         : "",
-      ...objectiveValues,
     ].map(csvCell).join(","));
   }
 
   const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const timestamp = new Date().toISOString().replaceAll(":", "-");
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `grading-results-${timestamp}.csv`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(link.href);
+  downloadBlob(blob, `grading-student-results-${timestamp}.csv`);
+}
+
+function downloadObjectiveReportCsv() {
+  if (!state.results) {
+    return;
+  }
+
+  const formulaDescription = gradingFormulaDescription(state.results.gradingFormula);
+  const objectives = Array.isArray(state.results.report?.learningObjectives)
+    ? state.results.report.learningObjectives
+    : [];
+  const header = [
+    "Grading Run ID",
+    "Graded At",
+    "Input",
+    "Formula",
+    "Objective ID",
+    "Objective Label",
+    "Questions",
+    "Score",
+    "Score Percent",
+    "Earned Points",
+    "Possible Points",
+    "Correct",
+    "Correct Percent",
+    "Wrong",
+    "Wrong Percent",
+    "Blank",
+    "Missing",
+    "Blank / Missing",
+    "Blank / Missing Percent",
+    "Invalid",
+    "Invalid Percent",
+    "Penalty",
+  ];
+  const lines = [header.map(csvCell).join(",")];
+
+  for (const objective of objectives) {
+    lines.push([
+      state.results.gradingRunId || "",
+      state.results.gradedAt || "",
+      state.results.inputPath || "",
+      formulaDescription,
+      objective.id || "",
+      objective.label || "",
+      String(objective.questionCount ?? ""),
+      scoreText(objective.earnedPoints, objective.possiblePoints),
+      formatScore(scorePercent(objective)),
+      formatScore(objective.earnedPoints),
+      formatScore(objective.possiblePoints),
+      String(objective.correctCount ?? 0),
+      formatScore(correctPercent(objective)),
+      String(objective.wrongCount ?? 0),
+      formatScore(wrongPercent(objective)),
+      String(objective.blankCount ?? 0),
+      String(objective.missingCount ?? 0),
+      String(objectiveBlankMissingCount(objective)),
+      formatScore(blankMissingPercent(objective)),
+      String(objective.invalidCount ?? 0),
+      formatScore(percentage(objective.invalidCount, questionCount(objective))),
+      formatScore(objective.penaltyPoints),
+    ].map(csvCell).join(","));
+  }
+
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const timestamp = new Date().toISOString().replaceAll(":", "-");
+  downloadBlob(blob, `grading-objective-report-${timestamp}.csv`);
 }
 
 function renderSummary() {
@@ -645,6 +781,7 @@ function renderSummary() {
   elements.annotateGradedPdfs.disabled = !hasResult || isBusy;
   elements.deleteGradingRun.disabled = !hasResult || isBusy || !result?.gradingRunId;
   elements.exportGradingCsv.disabled = !hasResult || isBusy;
+  elements.exportObjectiveCsv.disabled = !hasResult || isBusy;
   elements.recalculateGrading.disabled = !hasResult || isBusy;
   elements.runGrading.disabled = isBusy || state.gradingFiles.length === 0;
   elements.browseGradingFile.disabled = isBusy;
@@ -675,9 +812,15 @@ function renderSummary() {
   elements.gradingKnownCount.textContent = String(result.summary.knownStudentCount);
   elements.gradingDuplicateCount.textContent = String(result.summary.duplicateStudentIdCount ?? 0);
   elements.gradingOErrorCount.textContent = String(result.summary.omrErrorCount);
-  elements.gradingMismatchCount.textContent = String(result.summary.mismatchCount);
-  elements.gradingTotalScore.textContent = `${formatScore(reportTotal.earnedPoints)}/${formatScore(reportTotal.possiblePoints)}`;
-  elements.gradingTotalWrong.textContent = String(reportTotal.wrongCount ?? 0);
+  const mismatchPercent = result.summary.mismatchPercent ?? percentage(result.summary.mismatchCount, result.summary.processedCount);
+  elements.gradingMismatchCount.textContent = `${result.summary.mismatchCount ?? 0}/${result.summary.processedCount ?? 0} rows (${formatPercent(mismatchPercent)})`;
+  elements.gradingMismatchCount.title = "Rows that need review because of QR, variant, question-count, duplicate student ID, OMR, invalid-choice, or missing-row issues.";
+  elements.gradingTotalScore.textContent = scoreWithPercent(reportTotal);
+  elements.gradingTotalWrong.textContent = countRatioWithPercent(
+    reportTotal.wrongCount ?? 0,
+    questionCount(reportTotal),
+    wrongPercent(reportTotal),
+  );
   elements.gradingFormulaSummary.textContent = formulaDescription;
 
   const objectiveFragment = document.createDocumentFragment();
@@ -703,21 +846,30 @@ function renderSummary() {
 
       const scoreCell = document.createElement("td");
       scoreCell.append(createScorePill(
-        `${formatScore(objective.earnedPoints)}/${formatScore(objective.possiblePoints)}`,
+        scoreWithPercent(objective),
         "score",
       ));
       row.append(scoreCell);
 
       const correctCell = document.createElement("td");
-      correctCell.append(createScorePill(String(objective.correctCount ?? 0), "correct"));
+      correctCell.append(createScorePill(
+        countWithPercent(objective.correctCount ?? 0, correctPercent(objective)),
+        "correct",
+      ));
       row.append(correctCell);
 
       const wrongCell = document.createElement("td");
-      wrongCell.append(createScorePill(String(objective.wrongCount ?? 0), "wrong"));
+      wrongCell.append(createScorePill(
+        countWithPercent(objective.wrongCount ?? 0, wrongPercent(objective)),
+        "wrong",
+      ));
       row.append(wrongCell);
 
       const blankCell = document.createElement("td");
-      blankCell.append(createScorePill(String(objectiveBlankMissingCount(objective)), "blank"));
+      blankCell.append(createScorePill(
+        countWithPercent(objectiveBlankMissingCount(objective), blankMissingPercent(objective)),
+        "blank",
+      ));
       row.append(blankCell);
 
       objectiveFragment.append(row);
@@ -780,21 +932,30 @@ function renderSummary() {
 
     const scoreCell = document.createElement("td");
     scoreCell.append(createScorePill(
-      `${formatScore(row.summary.earnedPoints)}/${formatScore(row.summary.possiblePoints)}`,
+      scoreWithPercent(row.summary),
       "score",
     ));
     tableRow.append(scoreCell);
 
     const correctCell = document.createElement("td");
-    correctCell.append(createScorePill(String(row.summary.correctCount), "correct"));
+    correctCell.append(createScorePill(
+      countWithPercent(row.summary.correctCount, correctPercent(row.summary)),
+      "correct",
+    ));
     tableRow.append(correctCell);
 
     const wrongCell = document.createElement("td");
-    wrongCell.append(createScorePill(String(row.summary.wrongCount ?? row.summary.incorrectCount ?? 0), "wrong"));
+    wrongCell.append(createScorePill(
+      countWithPercent(row.summary.wrongCount ?? row.summary.incorrectCount ?? 0, wrongPercent(row.summary)),
+      "wrong",
+    ));
     tableRow.append(wrongCell);
 
     const blankCell = document.createElement("td");
-    blankCell.append(createScorePill(String(row.summary.blankCount + row.summary.missingCount), "blank"));
+    blankCell.append(createScorePill(
+      countWithPercent(row.summary.blankCount + row.summary.missingCount, blankMissingPercent(row.summary)),
+      "blank",
+    ));
     tableRow.append(blankCell);
 
     const objectiveCell = document.createElement("td");
@@ -852,6 +1013,7 @@ function renderSelectedDetail(rows) {
       <tr>
         <td>${question.position}</td>
         <td class="cell-copy">${renderRichTextHtml(question.prompt || "—")}${renderQuestionImageHtml(question)}</td>
+        <td class="cell-copy">${escapeHtml(questionObjectiveText(question))}</td>
         <td>${escapeHtml(question.allowedChoices.join(", ") || "—")}</td>
         <td>${escapeHtml(question.markedAnswers.join(", ") || "—")}</td>
         <td>${escapeHtml(question.correctAnswers.join(", ") || "—")}</td>
@@ -860,7 +1022,7 @@ function renderSelectedDetail(rows) {
         <td class="cell-copy">${escapeHtml(question.issues.join(" ") || "—")}</td>
       </tr>
     `).join("")
-    : "<tr><td colspan=\"8\">No question-level data available.</td></tr>";
+    : "<tr><td colspan=\"9\">No question-level data available.</td></tr>";
 
   detail.innerHTML = `
     <div class="grading-detail-card__head">
@@ -872,13 +1034,13 @@ function renderSelectedDetail(rows) {
       <span class="status-badge status-badge--${statusTone(selectedRow)}">${escapeHtml(statusLabel(selectedRow))}</span>
     </div>
     <div class="grading-detail-metrics">
-      <div class="metric"><span class="metric__label">Score</span><span class="metric__value">${formatScore(selectedRow.summary.earnedPoints)} / ${formatScore(selectedRow.summary.possiblePoints)}</span></div>
-      <div class="metric"><span class="metric__label">Correct</span><span class="metric__value">${selectedRow.summary.correctCount}</span></div>
-      <div class="metric"><span class="metric__label">Wrong</span><span class="metric__value">${selectedRow.summary.wrongCount ?? selectedRow.summary.incorrectCount}</span></div>
+      <div class="metric"><span class="metric__label">Score</span><span class="metric__value">${scoreWithPercent(selectedRow.summary)}</span></div>
+      <div class="metric"><span class="metric__label">Correct</span><span class="metric__value">${countWithPercent(selectedRow.summary.correctCount, correctPercent(selectedRow.summary))}</span></div>
+      <div class="metric"><span class="metric__label">Wrong</span><span class="metric__value">${countWithPercent(selectedRow.summary.wrongCount ?? selectedRow.summary.incorrectCount, wrongPercent(selectedRow.summary))}</span></div>
       <div class="metric"><span class="metric__label">Penalty</span><span class="metric__value">${formatScore(selectedRow.summary.penaltyPoints)}</span></div>
-      <div class="metric"><span class="metric__label">Blank</span><span class="metric__value">${selectedRow.summary.blankCount}</span></div>
-      <div class="metric"><span class="metric__label">Missing</span><span class="metric__value">${selectedRow.summary.missingCount}</span></div>
-      <div class="metric"><span class="metric__label">Invalid</span><span class="metric__value">${selectedRow.summary.invalidCount}</span></div>
+      <div class="metric"><span class="metric__label">Blank</span><span class="metric__value">${countWithPercent(selectedRow.summary.blankCount, percentage(selectedRow.summary.blankCount, questionCount(selectedRow.summary)))}</span></div>
+      <div class="metric"><span class="metric__label">Missing</span><span class="metric__value">${countWithPercent(selectedRow.summary.missingCount, percentage(selectedRow.summary.missingCount, questionCount(selectedRow.summary)))}</span></div>
+      <div class="metric"><span class="metric__label">Invalid</span><span class="metric__value">${countWithPercent(selectedRow.summary.invalidCount, percentage(selectedRow.summary.invalidCount, questionCount(selectedRow.summary)))}</span></div>
     </div>
     <div class="grading-detail-card__issues">
       <h4>Formula</h4>
@@ -898,6 +1060,7 @@ function renderSelectedDetail(rows) {
           <tr>
             <th>Q#</th>
             <th>Prompt</th>
+            <th>LO</th>
             <th>Allowed</th>
             <th>Marked</th>
             <th>Correct</th>
@@ -1227,6 +1390,9 @@ function wireEvents() {
   });
   elements.exportGradingCsv.addEventListener("click", () => {
     downloadGradingCsv();
+  });
+  elements.exportObjectiveCsv.addEventListener("click", () => {
+    downloadObjectiveReportCsv();
   });
   elements.sortCorrect.addEventListener("click", () => {
     state.correctSortDirection = state.correctSortDirection === "desc" ? "asc" : "desc";

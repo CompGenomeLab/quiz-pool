@@ -169,7 +169,7 @@
                   <span id="grading-omr-error-count" class="metric__value">0</span>
                 </div>
                 <div class="metric">
-                  <span class="metric__label">Rows With Mismatches</span>
+                  <span class="metric__label">Rows Needing Review</span>
                   <span id="grading-mismatch-count" class="metric__value">0</span>
                 </div>
                 <div class="metric">
@@ -192,6 +192,10 @@
                 <div>
                   <p class="eyebrow">Learning Objectives</p>
                   <h2>Total Objective Report</h2>
+                  <p class="helper-copy">Questions tagged with multiple learning objectives count fully toward each tagged objective, so objective totals are tag-based and may exceed exam totals when summed.</p>
+                </div>
+                <div class="panel__actions">
+                  <button id="export-objective-csv" class="button button--ghost" type="button" disabled>Export CSV</button>
                 </div>
               </div>
               <div class="table-wrap">
@@ -200,10 +204,10 @@
                     <tr>
                       <th>Objective</th>
                       <th>Questions</th>
-                      <th>Score</th>
-                      <th>Correct</th>
-                      <th>Wrong</th>
-                      <th>Blank / Missing</th>
+                      <th>Score % (Points)</th>
+                      <th>Correct %</th>
+                      <th>Wrong %</th>
+                      <th>Blank / Missing %</th>
                     </tr>
                   </thead>
                   <tbody id="grading-objective-report-body"></tbody>
