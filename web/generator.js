@@ -1,4 +1,4 @@
-import { renderRichTextHtml, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
+import { renderRichTextHtml, stripRichTextMarkup } from "./rich-text.js";
 
 const state = {
   activePoolQuestionId: "",
@@ -6,6 +6,7 @@ const state = {
   examStorePath: "",
   generatedRun: null,
   quiz: null,
+  sourceSearch: "",
   statusSortDirection: "default",
   statusIsError: false,
   statusMessage: "Loading quiz data...",
@@ -21,26 +22,11 @@ const state = {
   },
 };
 
-const DEFAULT_EXAM_RULES = [
-  "Fill bubbles fully. Complete all ID columns with leading zeros (e.g., 00012345).",
-  "Read every question carefully and select all correct answers for each question.",
-  "Mark answers clearly and keep your paper neat for printing, photocopying, and scanning.",
-  "Do not communicate with other students or use unauthorized materials during the exam.",
-  "Remain seated until instructed to stop and submit your paper.",
-];
-const DEFAULT_OMR_INSTRUCTIONS = DEFAULT_EXAM_RULES[0];
 const MAX_QUESTIONS_PER_EXAM = 100;
-
-function defaultExamRules(omrInstructions = DEFAULT_OMR_INSTRUCTIONS) {
-  return [
-    omrInstructions,
-    ...DEFAULT_EXAM_RULES.slice(1),
-  ];
-}
 
 const elements = {
   availableCount: document.querySelector("#available-count"),
-  sourceFilters: document.querySelector("#source-filters"),
+  clearSourceFilters: document.querySelector("#clear-source-filters"),
   dbPath: document.querySelector("#db-path"),
   difficultyFilters: document.querySelector("#difficulty-filters"),
   examStorePath: document.querySelector("#exam-store-path"),
@@ -61,47 +47,24 @@ const elements = {
   poolQuestionTitle: document.querySelector("#pool-question-title"),
   questionCount: document.querySelector("#question-count"),
   resetOverrides: document.querySelector("#reset-overrides"),
-  resultCourseName: document.querySelector("#result-course-name"),
-  resultExamDate: document.querySelector("#result-exam-date"),
-  resultExamName: document.querySelector("#result-exam-name"),
   resultExamSetId: document.querySelector("#result-exam-set-id"),
   resultGeneratedAt: document.querySelector("#result-generated-at"),
   resultGenerationSeed: document.querySelector("#result-generation-seed"),
   resultHeading: document.querySelector("#result-heading"),
+  resultMessage: document.querySelector("#result-message"),
   resultSelectedCount: document.querySelector("#result-selected-count"),
   resultVariantCount: document.querySelector("#result-variant-count"),
+  resultViewerLink: document.querySelector("#result-viewer-link"),
   results: document.querySelector("#generation-results"),
+  selectVisibleSources: document.querySelector("#select-visible-sources"),
+  sourceFilterCount: document.querySelector("#source-filter-count"),
+  sourceFilterSearch: document.querySelector("#source-filter-search"),
+  sourceFilterSummary: document.querySelector("#source-filter-summary"),
+  sourceFilters: document.querySelector("#source-filters"),
   closePoolQuestion: document.querySelector("#close-pool-question"),
   sortStatus: document.querySelector("#sort-status"),
-  teacherSummaryBody: document.querySelector("#teacher-summary-body"),
   variantCount: document.querySelector("#variant-count"),
-  variantPreviews: document.querySelector("#variant-previews"),
 };
-
-function normalizeTextValue(value, fallback = "") {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
-}
-
-function runPrintSettings(run) {
-  const settings = run?.printSettings ?? {};
-  return {
-    institutionName: normalizeTextValue(settings.institutionName, "Institution Name"),
-    examName: normalizeTextValue(settings.examName, run?.quiz?.title || "Generated Exam"),
-    courseName: normalizeTextValue(settings.courseName, "—"),
-    examDate: normalizeTextValue(settings.examDate, "—"),
-    startTime: normalizeTextValue(settings.startTime, "—"),
-    totalTimeMinutes: String(settings.totalTimeMinutes ?? "").trim() || "—",
-    instructor: normalizeTextValue(settings.instructor, ""),
-    allowedMaterials: normalizeTextValue(settings.allowedMaterials, ""),
-    omrInstructions: normalizeTextValue(settings.omrInstructions, DEFAULT_OMR_INSTRUCTIONS),
-    examRules: normalizeExamRules(settings.examRules),
-  };
-}
-
-function variantPageCount(variant) {
-  const totalPages = variant?.printLayout?.totalPages;
-  return Number.isInteger(totalPages) && totalPages > 0 ? totalPages : 1;
-}
 
 function setStatus(message, isError = false) {
   state.statusMessage = message;
@@ -112,6 +75,16 @@ function setStatus(message, isError = false) {
 
 function dedupe(items) {
   return [...new Set(items)];
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function formatPoints(value) {
+  const points = Number(value);
+  const normalized = Number.isFinite(points) ? points : 0;
+  return Number.isInteger(normalized) ? String(normalized) : normalized.toFixed(1).replace(/\.0$/u, "");
 }
 
 function truncate(text, maxLength = 120) {
@@ -140,24 +113,6 @@ function questionImageAssetIds(question = {}) {
     : [];
 }
 
-function createQuestionImagePreviews(question) {
-  const imageAssetIds = questionImageAssetIds(question);
-  if (imageAssetIds.length === 0) {
-    return null;
-  }
-  const wrap = document.createElement("div");
-  wrap.className = "question-image-list";
-  imageAssetIds.forEach((assetId, index) => {
-    const image = document.createElement("img");
-    image.className = "question-image-preview";
-    image.src = assetUrl(assetId);
-    image.alt = `Question image ${index + 1}`;
-    image.loading = "lazy";
-    wrap.append(image);
-  });
-  return wrap;
-}
-
 function renderQuestionImageHtml(question) {
   const images = questionImageAssetIds(question);
   if (images.length === 0) {
@@ -170,29 +125,6 @@ function renderQuestionImageHtml(question) {
       `).join("")}
     </div>
   `;
-}
-
-function parseExamRules(value) {
-  return value
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function normalizeExamRules(value) {
-  if (Array.isArray(value)) {
-    const rules = value.map((rule) => normalizeTextValue(rule)).filter(Boolean);
-    if (rules.length > 0) {
-      return rules;
-    }
-  }
-  if (typeof value === "string" && value.trim() !== "") {
-    const rules = parseExamRules(value);
-    if (rules.length > 0) {
-      return rules;
-    }
-  }
-  return defaultExamRules();
 }
 
 function locationText(value) {
@@ -229,12 +161,132 @@ function locationLocator(location = {}) {
   ].filter(Boolean).join(" · ") || "—";
 }
 
+function questionLocations(question = {}) {
+  if (Array.isArray(question.locations)) {
+    return question.locations.filter((location) => location && typeof location === "object");
+  }
+  if (Array.isArray(question.bookLocations)) {
+    return question.bookLocations.filter((location) => location && typeof location === "object");
+  }
+  return [];
+}
+
 function questionSources(question) {
   return dedupe(
-    ((question.locations ?? question.bookLocations) ?? [])
+    questionLocations(question)
       .map((location) => locationSourceLabel(location))
       .filter(Boolean),
   );
+}
+
+function questionSourceDetails(question) {
+  return questionLocations(question)
+    .map((location) => {
+      const label = locationSourceLabel(location);
+      if (!label) {
+        return null;
+      }
+      return {
+        label,
+        source: locationSourceDisplay(location),
+        locator: locationLocator(location),
+        url: locationText(location.url),
+        reference: locationText(location.reference),
+      };
+    })
+    .filter(Boolean);
+}
+
+function sourceDetailText(detail) {
+  return [
+    detail.source !== "—" && detail.source !== detail.label ? detail.source : "",
+    detail.locator !== "—" && detail.locator !== detail.label ? detail.locator : "",
+    detail.url && detail.url !== detail.label ? detail.url : "",
+    detail.reference && detail.reference !== detail.label ? detail.reference : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function difficultySummary(difficulties) {
+  if (difficulties.length === 0) {
+    return "No difficulty";
+  }
+  if (difficulties.length <= 3) {
+    return `Difficulty ${difficulties.join(", ")}`;
+  }
+  return `Difficulty ${difficulties[0]}-${difficulties[difficulties.length - 1]}`;
+}
+
+function sourceQuestionIdPreview(questionIds) {
+  const visibleIds = questionIds.slice(0, 5).join(", ");
+  const hiddenCount = questionIds.length - 5;
+  return hiddenCount > 0 ? `${visibleIds}, +${hiddenCount}` : visibleIds;
+}
+
+function sourceFilterOptions() {
+  const optionsByLabel = new Map();
+  for (const question of state.quiz.questions) {
+    const details = questionSourceDetails(question);
+    const labels = dedupe(details.map((detail) => detail.label));
+    for (const label of labels) {
+      if (!optionsByLabel.has(label)) {
+        optionsByLabel.set(label, {
+          label,
+          questionIds: [],
+          questionCount: 0,
+          pointTotal: 0,
+          difficulties: new Set(),
+          detailLines: new Set(),
+        });
+      }
+      const option = optionsByLabel.get(label);
+      option.questionIds.push(question.id);
+      option.questionCount += 1;
+      option.pointTotal += Number(question.points ?? 1) || 0;
+      if (question.difficulty !== undefined && question.difficulty !== null && question.difficulty !== "") {
+        option.difficulties.add(question.difficulty);
+      }
+      for (const detail of details.filter((item) => item.label === label)) {
+        const detailLine = sourceDetailText(detail);
+        if (detailLine) {
+          option.detailLines.add(detailLine);
+        }
+      }
+    }
+  }
+
+  return [...optionsByLabel.values()]
+    .map((option) => {
+      const questionIds = [...option.questionIds].sort((left, right) => String(left).localeCompare(String(right)));
+      const difficulties = [...option.difficulties].sort((left, right) => Number(left) - Number(right));
+      const detailLines = [...option.detailLines].sort((left, right) => left.localeCompare(right));
+      const detailPreview = detailLines.length > 0
+        ? `${detailLines.slice(0, 2).join(" | ")}${detailLines.length > 2 ? ` | +${detailLines.length - 2}` : ""}`
+        : "Reference label only";
+      const meta = [
+        pluralize(option.questionCount, "question"),
+        `${formatPoints(option.pointTotal)} pt`,
+        difficultySummary(difficulties),
+        sourceQuestionIdPreview(questionIds),
+      ].filter(Boolean);
+      return {
+        ...option,
+        questionIds,
+        difficulties,
+        detailLines,
+        detailPreview,
+        metaText: meta.join(" · "),
+        searchText: [option.label, ...detailLines, ...questionIds].join(" ").toLocaleLowerCase(),
+      };
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function visibleSourceFilterOptions(sourceOptions) {
+  const query = state.sourceSearch.trim().toLocaleLowerCase();
+  if (!query) {
+    return sourceOptions;
+  }
+  return sourceOptions.filter((option) => option.searchText.includes(query));
 }
 
 function objectiveLabel(objectiveId) {
@@ -242,16 +294,15 @@ function objectiveLabel(objectiveId) {
 }
 
 function filterOptions() {
-  const sources = dedupe(state.quiz.questions.flatMap(questionSources)).sort((left, right) =>
-    left.localeCompare(right),
-  );
+  const sourceOptions = sourceFilterOptions();
+  const sources = sourceOptions.map((option) => option.label);
   const difficulties = dedupe(state.quiz.questions.map((question) => question.difficulty)).sort((left, right) => left - right);
   const learningObjectives = state.quiz.learningObjectives.map((objective) => ({
     id: objective.id,
     label: objective.label,
   }));
 
-  return { sources, difficulties, learningObjectives };
+  return { sources, sourceOptions, difficulties, learningObjectives };
 }
 
 function overrideMode(questionId) {
@@ -384,23 +435,130 @@ function createFilterChip(labelText, checked, onChange) {
   return label;
 }
 
-function renderFilterGroups() {
-  const options = filterOptions();
+function setSourceSelected(source, selected) {
+  state.selection.sources = selected
+    ? dedupe([...state.selection.sources, source])
+    : state.selection.sources.filter((item) => item !== source);
+}
+
+function createSourceOption(option) {
+  const checked = state.selection.sources.includes(option.label);
+  const label = document.createElement("label");
+  label.className = `source-option${checked ? " is-selected" : ""}`;
+
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = checked;
+  input.addEventListener("change", (event) => {
+    setSourceSelected(option.label, event.target.checked);
+    renderPoolState();
+    scheduleDraftSave();
+  });
+
+  const body = document.createElement("span");
+  body.className = "source-option__body";
+
+  const top = document.createElement("span");
+  top.className = "source-option__top";
+
+  const title = document.createElement("strong");
+  title.textContent = option.label;
+
+  const count = document.createElement("span");
+  count.className = "source-option__count";
+  count.textContent = pluralize(option.questionCount, "question");
+
+  const meta = document.createElement("span");
+  meta.className = "source-option__meta";
+  meta.textContent = option.metaText;
+
+  const detail = document.createElement("span");
+  detail.className = "source-option__detail";
+  detail.textContent = option.detailPreview;
+
+  top.append(title, count);
+  body.append(top, meta, detail);
+  label.append(input, body);
+  return label;
+}
+
+function createSelectedSourceToken(source) {
+  const button = document.createElement("button");
+  button.className = "source-filter-token";
+  button.type = "button";
+  button.setAttribute("aria-label", `Remove ${source} source filter`);
+
+  const text = document.createElement("span");
+  text.textContent = source;
+
+  const remove = document.createElement("span");
+  remove.className = "source-filter-token__remove";
+  remove.textContent = "x";
+
+  button.append(text, remove);
+  button.addEventListener("click", () => {
+    setSourceSelected(source, false);
+    renderPoolState();
+    scheduleDraftSave();
+  });
+  return button;
+}
+
+function createSourceFilterEmpty(message) {
+  const empty = document.createElement("div");
+  empty.className = "source-filter-empty";
+  empty.textContent = message;
+  return empty;
+}
+
+function renderSourceFilterGroup(sourceOptions) {
+  const visibleOptions = visibleSourceFilterOptions(sourceOptions);
+  const selectedSet = new Set(state.selection.sources);
+  const selectedSources = state.selection.sources.filter((source) =>
+    sourceOptions.some((option) => option.label === source),
+  );
+  const selectedCount = selectedSources.length;
+  const shownText = state.sourceSearch
+    ? `${visibleOptions.length}/${sourceOptions.length} shown`
+    : pluralize(sourceOptions.length, "source");
+
+  elements.sourceFilterCount.textContent = selectedCount > 0
+    ? `${selectedCount} selected · ${shownText}`
+    : shownText;
+  elements.sourceFilterSearch.value = state.sourceSearch;
+  elements.sourceFilterSearch.disabled = sourceOptions.length === 0;
+  elements.selectVisibleSources.disabled = visibleOptions.length === 0
+    || visibleOptions.every((option) => selectedSet.has(option.label));
+  elements.clearSourceFilters.disabled = selectedCount === 0;
+
+  if (selectedSources.length === 0) {
+    elements.sourceFilterSummary.classList.add("hidden");
+    elements.sourceFilterSummary.replaceChildren();
+  } else {
+    const summaryFragment = document.createDocumentFragment();
+    for (const source of selectedSources) {
+      summaryFragment.append(createSelectedSourceToken(source));
+    }
+    elements.sourceFilterSummary.replaceChildren(summaryFragment);
+    elements.sourceFilterSummary.classList.remove("hidden");
+  }
 
   const sourceFragment = document.createDocumentFragment();
-  for (const source of options.sources) {
-    sourceFragment.append(
-      createFilterChip(source, state.selection.sources.includes(source), (event) => {
-        state.selection.sources = event.target.checked
-          ? [...state.selection.sources, source]
-          : state.selection.sources.filter((item) => item !== source);
-        state.selection.sources = dedupe(state.selection.sources);
-        renderPoolState();
-        scheduleDraftSave();
-      }),
-    );
+  if (sourceOptions.length === 0) {
+    sourceFragment.append(createSourceFilterEmpty("No sources in this pool."));
+  } else if (visibleOptions.length === 0) {
+    sourceFragment.append(createSourceFilterEmpty("No sources match your search."));
+  } else {
+    for (const option of visibleOptions) {
+      sourceFragment.append(createSourceOption(option));
+    }
   }
   elements.sourceFilters.replaceChildren(sourceFragment);
+}
+
+function renderFilterGroups() {
+  const options = filterOptions();
+  renderSourceFilterGroup(options.sourceOptions);
 
   const difficultyFragment = document.createDocumentFragment();
   for (const difficulty of options.difficulties) {
@@ -632,188 +790,42 @@ function renderPoolState() {
   updateSummary();
 }
 
+function generatedExamViewerUrl(examSetId) {
+  return `/viewer.html?examSetId=${encodeURIComponent(examSetId)}`;
+}
+
 function renderGeneratedRun() {
   const run = state.generatedRun;
   const hasRun = Boolean(run);
   elements.results.classList.toggle("hidden", !hasRun);
 
   if (!hasRun) {
-    elements.teacherSummaryBody.replaceChildren();
-    elements.variantPreviews.replaceChildren();
-    elements.resultExamName.textContent = "";
-    elements.resultCourseName.textContent = "";
-    elements.resultExamDate.textContent = "";
+    elements.resultHeading.textContent = "Exam Set Saved";
+    elements.resultMessage.textContent = "";
+    elements.resultViewerLink.href = "/viewer.html";
+    elements.resultExamSetId.textContent = "";
+    elements.resultGeneratedAt.textContent = "";
     elements.resultGenerationSeed.textContent = "";
+    elements.resultSelectedCount.textContent = "";
+    elements.resultVariantCount.textContent = "";
     return;
   }
 
-  const printSettings = runPrintSettings(run);
-  elements.resultHeading.textContent = `${printSettings.examName} Variants`;
+  const selectedQuestionIds = Array.isArray(run.selection?.selectedQuestionIds)
+    ? run.selection.selectedQuestionIds
+    : [];
+  const selectedCount = selectedQuestionIds.length || run.variants?.[0]?.questions?.length || 0;
+  const variantCount = Array.isArray(run.variants) ? run.variants.length : 0;
+  const viewerUrl = generatedExamViewerUrl(run.examSetId);
+
+  elements.resultHeading.textContent = "Generation Successful";
+  elements.resultMessage.textContent = `Exam set ${run.examSetId} was saved. Open it in Exam Viewer to review details, update printable metadata, and export the print ZIP.`;
+  elements.resultViewerLink.href = viewerUrl;
   elements.resultExamSetId.textContent = run.examSetId;
   elements.resultGeneratedAt.textContent = new Date(run.generatedAt).toLocaleString();
   elements.resultGenerationSeed.textContent = run.generationSeed || run.selection?.generationSeed || "—";
-  elements.resultSelectedCount.textContent = `${run.selection.selectedQuestionIds.length} selected`;
-  elements.resultVariantCount.textContent = `${run.variants.length} generated`;
-  elements.resultExamName.textContent = printSettings.examName;
-  elements.resultCourseName.textContent = printSettings.courseName;
-  elements.resultExamDate.textContent = printSettings.examDate;
-
-  const teacherFragment = document.createDocumentFragment();
-  for (const variant of run.variants) {
-    for (const question of variant.questions) {
-      const row = document.createElement("tr");
-      for (const value of [
-        variant.variantId,
-        String(question.position),
-        question.sourceQuestionId,
-        String(question.points ?? 1),
-        question.displayCorrectAnswers.join(", "),
-        question.sourceCorrectAnswers.join(", "),
-      ]) {
-        const cell = document.createElement("td");
-        cell.textContent = value;
-        row.append(cell);
-      }
-      teacherFragment.append(row);
-    }
-  }
-  elements.teacherSummaryBody.replaceChildren(teacherFragment);
-
-  const variantFragment = document.createDocumentFragment();
-  for (const variant of run.variants) {
-    const card = document.createElement("article");
-    card.className = "variant-card";
-
-    const header = document.createElement("div");
-    header.className = "variant-card__header";
-
-    const headingBlock = document.createElement("div");
-    const eyebrow = document.createElement("p");
-    eyebrow.className = "eyebrow";
-    eyebrow.textContent = "Student Variant";
-    const title = document.createElement("h3");
-    title.textContent = printSettings.examName;
-    const meta = document.createElement("p");
-    meta.className = "variant-card__meta";
-    const metaParts = [];
-    metaParts.push(printSettings.institutionName);
-    if (printSettings.courseName !== "—") metaParts.push(printSettings.courseName);
-    if (printSettings.examDate !== "—") metaParts.push(printSettings.examDate);
-    if (printSettings.startTime !== "—") metaParts.push(printSettings.startTime);
-    if (printSettings.totalTimeMinutes !== "—") metaParts.push(`${printSettings.totalTimeMinutes} min`);
-    metaParts.push(`${variant.questions.reduce((total, question) => total + Number(question.points ?? 1), 0)} pts`);
-    meta.textContent = metaParts.join(" · ") || "Generated from the current quiz pool.";
-    headingBlock.append(eyebrow, title, meta);
-
-    const qr = document.createElement("aside");
-    qr.className = "variant-card__qr";
-
-    const qrImage = document.createElement("img");
-    qrImage.className = "variant-card__qr-image";
-    qrImage.alt = "Variant tracking QR code";
-    qrImage.loading = "lazy";
-    qrImage.src = `/api/exams/variant-qr/${encodeURIComponent(variant.variantId)}.svg`;
-    qr.append(qrImage);
-
-    header.append(headingBlock, qr);
-
-    const cover = document.createElement("section");
-    cover.className = "variant-card__cover";
-
-    const studentInfo = document.createElement("div");
-    studentInfo.className = "variant-card__block";
-    studentInfo.innerHTML = `
-      <h4>Student Information</h4>
-      <div class="variant-card__line-grid">
-        <div class="variant-card__line-field variant-card__line-field--wide"><span>Name</span><i></i></div>
-        <div class="variant-card__line-field"><span>ID</span><i></i></div>
-        <div class="variant-card__line-field"><span>Class / Section</span><i></i></div>
-        <div class="variant-card__line-field variant-card__line-field--wide"><span>Signature</span><i></i></div>
-      </div>
-    `;
-
-    const examInfo = document.createElement("div");
-    examInfo.className = "variant-card__block";
-    const instructorFact = printSettings.instructor
-      ? `<div class="variant-card__fact"><span>Instructor</span><strong>${escapeHtml(printSettings.instructor)}</strong></div>`
-      : "";
-    const materialsFact = printSettings.allowedMaterials
-      ? `<div class="variant-card__fact"><span>Materials</span><strong>${escapeHtml(printSettings.allowedMaterials)}</strong></div>`
-      : "";
-    examInfo.innerHTML = `
-      <h4>Exam Information</h4>
-      <div class="variant-card__fact-grid">
-        <div class="variant-card__fact"><span>Exam Name</span><strong>${escapeHtml(printSettings.examName)}</strong></div>
-        <div class="variant-card__fact"><span>Course / Subject</span><strong>${escapeHtml(printSettings.courseName)}</strong></div>
-        <div class="variant-card__fact"><span>Exam Date</span><strong>${escapeHtml(printSettings.examDate)}</strong></div>
-        <div class="variant-card__fact"><span>Start Time</span><strong>${escapeHtml(printSettings.startTime)}</strong></div>
-        <div class="variant-card__fact"><span>Total Time in Minutes</span><strong>${escapeHtml(printSettings.totalTimeMinutes)}</strong></div>
-        ${instructorFact}
-        ${materialsFact}
-        <div class="variant-card__fact"><span>Number of Questions</span><strong>${variant.questions.length}</strong></div>
-        <div class="variant-card__fact"><span>Total Points</span><strong>${variant.questions.reduce((total, question) => total + Number(question.points ?? 1), 0)}</strong></div>
-        <div class="variant-card__fact"><span>Number of Pages</span><strong>${variantPageCount(variant)}</strong></div>
-      </div>
-    `;
-
-    const rules = document.createElement("div");
-    rules.className = "variant-card__block";
-    const rulesMarkup = printSettings.examRules
-      .map((rule) => `<li>${renderRichTextHtml(rule)}</li>`)
-      .join("");
-    rules.innerHTML = `
-      <h4>Exam Rules</h4>
-      <ol class="variant-card__rules">${rulesMarkup}</ol>
-      <p class="variant-card__instruction">Review each question and mark all correct answers. Questions begin on page 2.</p>
-    `;
-
-    cover.append(studentInfo, examInfo, rules);
-
-    const questionList = document.createElement("div");
-    questionList.className = "question-preview-list";
-
-    for (const question of variant.questions) {
-      const section = document.createElement("section");
-      section.className = "question-preview";
-
-      const questionHead = document.createElement("div");
-      questionHead.className = "question-preview__head";
-      questionHead.textContent = `Question ${question.position} · ${question.points ?? 1} pt`;
-
-      const title = document.createElement("p");
-      title.className = "question-preview__title";
-      renderRichTextIntoElement(title, question.question);
-      const imagePreviews = createQuestionImagePreviews(question);
-
-      const choices = document.createElement("ul");
-      choices.className = "choice-list";
-      for (const choice of question.displayChoices) {
-        const item = document.createElement("li");
-        const pill = document.createElement("span");
-        pill.className = "choice-pill";
-        const key = document.createElement("span");
-        key.className = "choice-pill__key";
-        key.textContent = `${choice.key}.`;
-        const text = document.createElement("span");
-        text.className = "choice-pill__text";
-        renderRichTextIntoElement(text, choice.text);
-        pill.append(key, text);
-        item.append(pill);
-        choices.append(item);
-      }
-
-      section.append(questionHead, title);
-      if (imagePreviews) {
-        section.append(imagePreviews);
-      }
-      section.append(choices);
-      questionList.append(section);
-    }
-
-    card.append(header, cover, questionList);
-    variantFragment.append(card);
-  }
-  elements.variantPreviews.replaceChildren(variantFragment);
+  elements.resultSelectedCount.textContent = `${selectedCount} selected`;
+  elements.resultVariantCount.textContent = `${variantCount} generated`;
 }
 
 function currentDraft() {
@@ -999,7 +1011,7 @@ async function generateExams() {
   renderErrors();
   renderGeneratedRun();
   scheduleDraftSave();
-  setStatus(`Generated ${result.variants.length} variant(s) for exam set ${result.examSetId}.`);
+  setStatus(`Generated exam set ${result.examSetId}. Open it in Exam Viewer for details and export.`);
 }
 
 function wireEvents() {
@@ -1031,6 +1043,29 @@ function wireEvents() {
 
   elements.generationSeed.addEventListener("input", (event) => {
     state.selection.generationSeed = event.target.value.slice(0, 128);
+    scheduleDraftSave();
+  });
+
+  elements.sourceFilterSearch.addEventListener("input", (event) => {
+    state.sourceSearch = event.target.value;
+    if (state.quiz) {
+      renderFilterGroups();
+    }
+  });
+
+  elements.selectVisibleSources.addEventListener("click", () => {
+    if (!state.quiz) {
+      return;
+    }
+    const visibleSources = visibleSourceFilterOptions(filterOptions().sourceOptions).map((option) => option.label);
+    state.selection.sources = dedupe([...state.selection.sources, ...visibleSources]);
+    renderPoolState();
+    scheduleDraftSave();
+  });
+
+  elements.clearSourceFilters.addEventListener("click", () => {
+    state.selection.sources = [];
+    renderPoolState();
     scheduleDraftSave();
   });
 

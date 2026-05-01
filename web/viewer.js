@@ -296,6 +296,20 @@ function examSetLabel(summary) {
   return `${examName} · ${when}`;
 }
 
+function requestedExamSetId() {
+  return new URL(window.location.href).searchParams.get("examSetId")?.trim() ?? "";
+}
+
+function updateSelectedExamSetUrl(examSetId) {
+  const url = new URL(window.location.href);
+  if (examSetId) {
+    url.searchParams.set("examSetId", examSetId);
+  } else {
+    url.searchParams.delete("examSetId");
+  }
+  window.history.replaceState({}, "", url);
+}
+
 function renderExamSetOptions() {
   const fragment = document.createDocumentFragment();
   for (const summary of state.examSets) {
@@ -686,6 +700,7 @@ async function loadExamSets() {
   if (state.examSets.length === 0) {
     state.selectedExamSetId = "";
     state.selectedExamSet = null;
+    updateSelectedExamSetUrl("");
     renderExamSetOptions();
     renderExamSetList();
     renderSelectedExamSet();
@@ -693,7 +708,9 @@ async function loadExamSets() {
     return;
   }
 
-  state.selectedExamSetId = state.examSets[0].examSetId;
+  const requestedId = requestedExamSetId();
+  const selectedSummary = state.examSets.find((summary) => summary.examSetId === requestedId) ?? state.examSets[0];
+  state.selectedExamSetId = selectedSummary.examSetId;
   renderExamSetOptions();
   renderExamSetList();
   await loadExamSet(state.selectedExamSetId);
@@ -718,6 +735,7 @@ async function loadExamSet(examSetId) {
 
   state.selectedExamSet = payload;
   state.selectedVariantId = payload.examSet.variants[0]?.variantId ?? "";
+  updateSelectedExamSetUrl(examSetId);
   state.validationErrors = [];
   renderErrors();
   populatePrintSettingsForm(payload.examSet.printSettings);

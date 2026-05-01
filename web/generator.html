@@ -95,12 +95,35 @@
           </div>
 
           <div class="filter-stack">
-            <section>
-              <div class="panel__subhead">
-                <h3>Source Filter</h3>
-                <p>Questions match if any reference label is selected.</p>
+            <section class="source-filter">
+              <div class="panel__subhead source-filter__head">
+                <div>
+                  <h3>Source Filter</h3>
+                  <p>Questions match if any selected source appears in a question reference.</p>
+                </div>
+                <span id="source-filter-count" class="source-filter__count">0 sources</span>
               </div>
-              <div id="source-filters" class="filter-chip-list"></div>
+              <div class="source-filter__tools">
+                <label class="field source-filter__search">
+                  <span>Find Sources</span>
+                  <input
+                    id="source-filter-search"
+                    type="search"
+                    autocomplete="off"
+                    placeholder="Search source, locator, or question ID"
+                  />
+                </label>
+                <div class="source-filter__actions">
+                  <button id="select-visible-sources" class="button button--tiny button--ghost" type="button">
+                    Select Visible
+                  </button>
+                  <button id="clear-source-filters" class="button button--tiny button--ghost" type="button">
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="source-filter-summary" class="source-filter__summary"></div>
+              <div id="source-filters" class="source-filter-list"></div>
             </section>
 
             <section>
@@ -173,14 +196,18 @@
           </section>
 
           <div id="generation-results" class="results-stack hidden">
-            <section class="panel no-print">
+            <section class="panel generation-success no-print">
               <div class="panel__head">
                 <div>
-                  <p class="eyebrow">Generated Run</p>
-                  <h2 id="result-heading">Exam Variant Set</h2>
+                  <p class="eyebrow">Generation Complete</p>
+                  <h2 id="result-heading">Exam Set Saved</h2>
+                </div>
+                <div class="panel__actions">
+                  <a id="result-viewer-link" class="button button--primary" href="/viewer.html">Open In Exam Viewer</a>
                 </div>
               </div>
-              <div class="result-summary">
+              <p id="result-message" class="generation-success__message"></p>
+              <div class="result-summary result-summary--compact">
                 <div class="metric">
                   <span class="metric__label">Exam Set ID</span>
                   <span id="result-exam-set-id" class="metric__value"></span>
@@ -201,58 +228,8 @@
                   <span class="metric__label">Variants</span>
                   <span id="result-variant-count" class="metric__value"></span>
                 </div>
-                <div class="metric">
-                  <span class="metric__label">Exam Name</span>
-                  <span id="result-exam-name" class="metric__value"></span>
-                </div>
-                <div class="metric">
-                  <span class="metric__label">Course Name</span>
-                  <span id="result-course-name" class="metric__value"></span>
-                </div>
-                <div class="metric">
-                  <span class="metric__label">Exam Date</span>
-                  <span id="result-exam-date" class="metric__value"></span>
-                </div>
               </div>
             </section>
-
-            <section class="panel teacher-panel no-print">
-              <div class="panel__head">
-                <div>
-                  <p class="eyebrow">Teacher View</p>
-                  <h2>Answer Key Summary</h2>
-                </div>
-              </div>
-              <div class="table-wrap">
-                <table class="pool-table">
-                  <thead>
-                    <tr>
-                      <th>Variant ID</th>
-                      <th>Question #</th>
-                      <th>Source Question</th>
-                      <th>Points</th>
-                      <th>Displayed Correct</th>
-                      <th>Source Correct</th>
-                    </tr>
-                  </thead>
-                  <tbody id="teacher-summary-body"></tbody>
-                </table>
-              </div>
-            </section>
-
-          <section class="panel student-panel">
-            <div class="panel__head no-print">
-              <div>
-                  <p class="eyebrow">Student View</p>
-                  <h2>Printable Variants</h2>
-              </div>
-            </div>
-            <p class="helper-copy no-print">
-                These previews show the generated question and choice order. Open the exam in Exam Viewer to edit
-                printable metadata and download PDFs.
-            </p>
-            <div id="variant-previews" class="variant-stack"></div>
-          </section>
           </div>
         </main>
       </div>

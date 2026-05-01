@@ -993,6 +993,32 @@ function renderSummary() {
   renderGradingDetailModal();
 }
 
+function runLevelCheckMarkup(row) {
+  const issues = Array.isArray(row.issues)
+    ? row.issues.map((issue) => String(issue || "").trim()).filter(Boolean)
+    : [];
+  if (issues.length === 0) {
+    return `
+      <div class="grading-run-check grading-run-check--ok" role="status">
+        <div class="grading-run-check__summary">
+          <span class="status-badge status-badge--eligible">Clear</span>
+          <strong>No run-level issues detected.</strong>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="grading-run-check grading-run-check--attention" role="status">
+      <div class="grading-run-check__summary">
+        <span class="status-badge status-badge--exclude">Needs Attention</span>
+        <strong>${issues.length} run-level ${issues.length === 1 ? "issue" : "issues"} found.</strong>
+      </div>
+      <ul class="grading-issue-list">${issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>
+    </div>
+  `;
+}
+
 function renderSelectedDetail(rows) {
   const selectedRow = rows.find((row) => row.rowIndex === state.selectedRowIndex) ?? null;
   if (!selectedRow) {
@@ -1005,9 +1031,7 @@ function renderSelectedDetail(rows) {
 
   const detail = document.createElement("article");
   detail.className = "grading-detail-card";
-  const issueMarkup = selectedRow.issues.length > 0
-    ? `<ul class="grading-issue-list">${selectedRow.issues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul>`
-    : "<p class=\"helper-copy\">No run-level issues detected.</p>";
+  const issueMarkup = runLevelCheckMarkup(selectedRow);
   const questionRows = selectedRow.questionDetails.length > 0
     ? selectedRow.questionDetails.map((question) => `
       <tr>
