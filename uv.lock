@@ -214,7 +214,7 @@ wheels = [
 [[package]]
 name = "omr"
 version = "0.1.0"
-source = { git = "https://github.com/vogulcan/omr.git#79b3efa376522aea47edb8688b13ee02e437c682" }
+source = { git = "https://github.com/vogulcan/omr.git#076d92f4f67fc4c0f1c4244cd632d7b4a3651f5c" }
 dependencies = [
     { name = "numpy" },
     { name = "opencv-python-headless" },
