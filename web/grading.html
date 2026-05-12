@@ -70,7 +70,8 @@
             <p class="eyebrow">Inputs</p>
             <h2>Scan Source</h2>
             <p class="helper-copy">
-              Choose one or more filled OMR sheet PDFs from this browser.
+              Choose one or more filled OMR sheet PDFs from this browser. A single PDF with
+              multiple pages is also supported — each page is graded as its own sheet.
             </p>
           </div>
 
@@ -106,7 +107,7 @@
           </div>
 
           <div class="sidebar__actions">
-            <button id="browse-grading-file" class="button button--ghost" type="button">Choose PDFs</button>
+            <button id="browse-grading-file" class="button button--ghost" type="button" title="Select multiple PDFs (one sheet per file) or a single multi-page PDF (one sheet per page).">Choose PDFs</button>
             <button id="browse-grading-folder" class="button button--ghost" type="button">Choose Folder</button>
             <button id="run-grading" class="button button--primary" type="button">Run Grading</button>
             <input id="grading-pdf-upload" class="visually-hidden-file" type="file" accept=".pdf,application/pdf" multiple />
