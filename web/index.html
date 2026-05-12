@@ -76,7 +76,19 @@
             <p id="save-status" class="status-card__hint">Loading quiz data...</p>
           </div>
 
+          <label class="field field--full">
+            <span>Search Questions</span>
+            <input
+              id="question-search"
+              type="search"
+              autocomplete="off"
+              placeholder="Fuzzy search id, prompt, choices, objectives, sources…"
+            />
+            <span id="question-search-summary" class="field__hint"></span>
+          </label>
+
           <div id="question-list" class="question-list"></div>
+          <p id="question-list-empty" class="helper-copy hidden">No questions match this search.</p>
         </aside>
 
         <main class="editor generator-main">

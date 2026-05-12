@@ -1,4 +1,5 @@
 import { hasRichTextMarkup, renderRichTextIntoElement, stripRichTextMarkup } from "./rich-text.js";
+import { buildQuestionSearchText, fuzzyQueryScore } from "./question-search.js";
 
 const state = {
   dbPath: "",
@@ -7,6 +8,7 @@ const state = {
   metaPanelCollapsed: false,
   pendingNavigationHref: "",
   quiz: null,
+  questionSearch: "",
   selectedQuestionIndex: 0,
   showReloadNotice: false,
   statusIsError: false,
@@ -46,6 +48,9 @@ const elements = {
   questionTextPreview: document.querySelector("#question-text-preview"),
   questionPoints: document.querySelector("#question-points"),
   questionList: document.querySelector("#question-list"),
+  questionListEmpty: document.querySelector("#question-list-empty"),
+  questionSearch: document.querySelector("#question-search"),
+  questionSearchSummary: document.querySelector("#question-search-summary"),
   questionObjectives: document.querySelector("#question-objectives"),
   questionShuffle: document.querySelector("#question-shuffle"),
   questionText: document.querySelector("#question-text"),
@@ -291,28 +296,42 @@ function updateSelectedQuestion(updater) {
   return state.quiz.questions[index];
 }
 
+function objectiveLabelFor(objectiveId) {
+  return state.quiz?.learningObjectives?.find((objective) => objective.id === objectiveId)?.label ?? "";
+}
+
 function renderQuestionList() {
   const fragment = document.createDocumentFragment();
-  for (const question of state.quiz.questions) {
-    const index = state.quiz.questions.indexOf(question);
+  const query = state.questionSearch.trim();
+  const total = state.quiz.questions.length;
+  const scored = state.quiz.questions.map((question, index) => {
+    const haystack = buildQuestionSearchText(question, { objectiveLabel: objectiveLabelFor });
+    return { question, index, score: query ? fuzzyQueryScore(haystack, query) : 1 };
+  });
+  const visible = query ? scored.filter((entry) => entry.score > 0) : scored;
+  if (query) {
+    visible.sort((left, right) => right.score - left.score);
+  }
+
+  for (const entry of visible) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "question-tile";
-    if (index === state.selectedQuestionIndex) {
+    if (entry.index === state.selectedQuestionIndex) {
       button.classList.add("is-selected");
     }
 
     const id = document.createElement("span");
     id.className = "question-tile__id";
-    id.textContent = question.id || "NO ID";
+    id.textContent = entry.question.id || "NO ID";
 
     const text = document.createElement("span");
     text.className = "question-tile__text";
-    text.textContent = stripRichTextMarkup(question.question) || "Untitled question";
+    text.textContent = stripRichTextMarkup(entry.question.question) || "Untitled question";
 
     button.append(id, text);
     button.addEventListener("click", () => {
-      state.selectedQuestionIndex = index;
+      state.selectedQuestionIndex = entry.index;
       syncEditorUrl();
       render();
     });
@@ -321,6 +340,17 @@ function renderQuestionList() {
   }
 
   elements.questionList.replaceChildren(fragment);
+
+  if (elements.questionListEmpty) {
+    elements.questionListEmpty.classList.toggle("hidden", visible.length > 0 || total === 0);
+  }
+  if (elements.questionSearchSummary) {
+    if (!query) {
+      elements.questionSearchSummary.textContent = `${total} question${total === 1 ? "" : "s"}`;
+    } else {
+      elements.questionSearchSummary.textContent = `${visible.length} of ${total} match`;
+    }
+  }
 }
 
 function renderLearningObjectives() {
@@ -799,6 +829,13 @@ function wireGlobalFields() {
     state.metaPanelCollapsed = !state.metaPanelCollapsed;
     window.localStorage.setItem(META_PANEL_STORAGE_KEY, String(state.metaPanelCollapsed));
     renderMetaPanel();
+  });
+
+  elements.questionSearch.addEventListener("input", (event) => {
+    state.questionSearch = event.target.value;
+    if (state.quiz) {
+      renderQuestionList();
+    }
   });
 
   elements.questionId.addEventListener("input", (event) => {

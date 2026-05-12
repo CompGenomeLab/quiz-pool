@@ -1457,6 +1457,54 @@ def build_question_pool_latex_assets(
     return assets
 
 
+def snapshot_question_for_diff(question: dict[str, Any]) -> dict[str, Any]:
+    locations = question.get("locations")
+    if not isinstance(locations, list):
+        fallback = question.get("bookLocations")
+        locations = fallback if isinstance(fallback, list) else []
+    return {
+        "id": question.get("id"),
+        "question": question.get("question", ""),
+        "choices": [
+            {"key": choice.get("key", ""), "text": choice.get("text", "")}
+            for choice in (question.get("choices") or [])
+            if isinstance(choice, dict)
+        ],
+        "correctAnswers": [str(value) for value in (question.get("correctAnswers") or [])],
+        "explanation": question.get("explanation", ""),
+        "difficulty": question.get("difficulty"),
+        "points": question.get("points"),
+        "shuffleChoices": bool(question.get("shuffleChoices")),
+        "learningObjectiveIds": [str(value) for value in (question.get("learningObjectiveIds") or [])],
+        "imageAssetIds": [str(value) for value in (question.get("imageAssetIds") or [])],
+        "locations": locations,
+    }
+
+
+def question_content_hash(question: dict[str, Any]) -> str:
+    locations = question.get("locations")
+    if not isinstance(locations, list):
+        locations = question.get("bookLocations") if isinstance(question.get("bookLocations"), list) else []
+    payload = {
+        "question": question.get("question", ""),
+        "choices": [
+            {"key": choice.get("key", ""), "text": choice.get("text", "")}
+            for choice in (question.get("choices") or [])
+            if isinstance(choice, dict)
+        ],
+        "correctAnswers": [str(value) for value in (question.get("correctAnswers") or [])],
+        "explanation": question.get("explanation", ""),
+        "difficulty": question.get("difficulty"),
+        "points": question.get("points"),
+        "shuffleChoices": bool(question.get("shuffleChoices")),
+        "learningObjectiveIds": [str(value) for value in (question.get("learningObjectiveIds") or [])],
+        "imageAssetIds": [str(value) for value in (question.get("imageAssetIds") or [])],
+        "locations": locations,
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def build_question_index(
     quiz: dict[str, Any],
 ) -> tuple[dict[str, dict[str, Any]], dict[str, int], list[dict[str, str]]]:
@@ -3384,6 +3432,11 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
             "filteredQuestionIds": filtered_question_ids,
             "availableQuestionIds": [question["id"] for question in available_questions],
             "selectedQuestionIds": [question["id"] for question in selected_questions],
+            "poolQuestionIds": [question["id"] for question in ordered_questions],
+            "poolQuestionHashes": {
+                question["id"]: question_content_hash(question) for question in ordered_questions
+            },
+            "poolSnapshot": [snapshot_question_for_diff(question) for question in ordered_questions],
             "maxUniqueVariants": str(max_unique_variants),
             "generationSeed": generation_seed,
         },
@@ -4888,10 +4941,16 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def handle_get_quiz(self) -> None:
             quiz = load_active_quiz(state)
+            question_hashes = {
+                question["id"]: question_content_hash(question)
+                for question in quiz.get("questions", [])
+                if isinstance(question, dict) and isinstance(question.get("id"), str)
+            }
             self.send_json(
                 {
                     **self.session_payload(),
                     "quiz": quiz,
+                    "questionHashes": question_hashes,
                 }
             )
 

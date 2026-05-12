@@ -7,6 +7,133 @@
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
+    <div id="restore-diff-modal" class="detail-modal" aria-hidden="true">
+      <div id="restore-diff-backdrop" class="detail-modal__backdrop"></div>
+      <section class="detail-modal__panel" role="dialog" aria-modal="true" aria-labelledby="restore-diff-title">
+        <div class="panel__head">
+          <div>
+            <p class="eyebrow">Restore Settings</p>
+            <h2 id="restore-diff-title">Pool Has Changed Since This Exam</h2>
+          </div>
+          <div class="panel__actions">
+            <button id="restore-diff-cancel" class="button button--ghost" type="button">Cancel</button>
+          </div>
+        </div>
+        <div class="question-detail-sheet">
+          <p id="restore-diff-summary" class="helper-copy"></p>
+
+          <section class="question-detail-sheet__block">
+            <h3>How this exam was configured</h3>
+            <dl class="restore-diff-preview">
+              <dt>Generated</dt><dd id="restore-diff-preview-when">—</dd>
+              <dt>Seed</dt><dd id="restore-diff-preview-seed">—</dd>
+              <dt>Questions per exam</dt><dd id="restore-diff-preview-count">—</dd>
+              <dt>Variants</dt><dd id="restore-diff-preview-variants">—</dd>
+              <dt>Source filters</dt><dd id="restore-diff-preview-sources">—</dd>
+              <dt>Difficulty filters</dt><dd id="restore-diff-preview-difficulties">—</dd>
+              <dt>Learning objective filters</dt><dd id="restore-diff-preview-objectives">—</dd>
+              <dt>Pool at generation time</dt><dd id="restore-diff-preview-pool">—</dd>
+              <dt>Eligible at generation time</dt><dd id="restore-diff-preview-eligible">—</dd>
+            </dl>
+          </section>
+
+          <section id="restore-diff-detection-block" class="question-detail-sheet__block">
+            <h3>Detection mode</h3>
+            <p id="restore-diff-detection" class="helper-copy"></p>
+          </section>
+
+          <section id="restore-diff-added-block" class="question-detail-sheet__block">
+            <div class="panel__subhead panel__subhead--split">
+              <div>
+                <h3 id="restore-diff-added-heading">New questions <span id="restore-diff-added-count" class="metric__label"></span></h3>
+                <p id="restore-diff-added-description" class="helper-copy"></p>
+              </div>
+              <div class="panel__actions">
+                <button class="button button--tiny button--ghost" data-bulk="added" data-decision="allow" type="button">Allow all</button>
+                <button class="button button--tiny button--ghost" data-bulk="added" data-decision="exclude" type="button">Exclude all</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="pool-table restore-diff-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Prompt</th>
+                    <th>Difficulty</th>
+                    <th>Pts</th>
+                    <th>Sources</th>
+                    <th>Objectives</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="restore-diff-added-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="restore-diff-modified-block" class="question-detail-sheet__block">
+            <div class="panel__subhead panel__subhead--split">
+              <div>
+                <h3>Edited since this exam <span id="restore-diff-modified-count" class="metric__label"></span></h3>
+                <p class="helper-copy">
+                  Each row lists the fields that changed. Click <em>Show diff</em> to see before/after. The exam's original PDFs are frozen — this choice only governs regeneration.
+                </p>
+              </div>
+              <div class="panel__actions">
+                <button class="button button--tiny button--ghost" data-bulk="modified" data-decision="keep" type="button">Keep all</button>
+                <button class="button button--tiny button--ghost" data-bulk="modified" data-decision="exclude" type="button">Exclude all</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="pool-table restore-diff-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Changed fields</th>
+                    <th>Current prompt</th>
+                    <th>Diff</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="restore-diff-modified-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="restore-diff-removed-block" class="question-detail-sheet__block">
+            <div class="panel__subhead">
+              <div>
+                <h3>Removed from pool <span id="restore-diff-removed-count" class="metric__label"></span></h3>
+                <p class="helper-copy">
+                  Listed for awareness only. These IDs existed in the pool when this exam was generated but no longer do, so they're silently skipped on restore.
+                </p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="pool-table restore-diff-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Vintage prompt</th>
+                    <th>Difficulty</th>
+                    <th>Pts</th>
+                    <th>Sources</th>
+                    <th>Objectives</th>
+                  </tr>
+                </thead>
+                <tbody id="restore-diff-removed-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="question-detail-sheet__block">
+            <div class="sidebar__actions">
+              <button id="restore-diff-apply" class="button button--primary" type="button">Apply restore</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
     <div id="pool-question-modal" class="detail-modal" aria-hidden="true">
       <div id="pool-question-backdrop" class="detail-modal__backdrop"></div>
       <section class="detail-modal__panel" role="dialog" aria-modal="true" aria-labelledby="pool-question-title">
@@ -72,6 +199,38 @@
             <label class="field field--full">
               <span>Seed</span>
               <input id="generation-seed" type="text" maxlength="128" placeholder="Random if blank" />
+            </label>
+            <label class="field field--full">
+              <span>
+                Reuse A Previous Exam's Settings
+                <span class="info-tip" tabindex="0" role="note" aria-label="What this option does">
+                  <span aria-hidden="true">!</span>
+                  <span class="info-tip__bubble">
+                    Loads the filters, source/difficulty/objective selections, per-row overrides, seed, and counts
+                    from a previously generated exam. If the pool has changed since then, a detail modal opens so
+                    you can decide per question what to do with added, edited, or removed entries.
+                  </span>
+                </span>
+              </span>
+              <select id="restore-from-exam">
+                <option value="">Pick an exam to reuse...</option>
+              </select>
+            </label>
+            <label class="field field--full">
+              <span>
+                Exclude Questions From Previous Exam
+                <span class="info-tip" tabindex="0" role="note" aria-label="What this option does">
+                  <span aria-hidden="true">!</span>
+                  <span class="info-tip__bubble">
+                    Pick a previously generated exam to force-exclude every question that was used in it from this
+                    new generation. Useful for creating a follow-up exam that doesn't repeat any question from the
+                    earlier one. Manual force-include on a row still wins.
+                  </span>
+                </span>
+              </span>
+              <select id="exclude-from-exam">
+                <option value="">None</option>
+              </select>
             </label>
           </div>
 
@@ -171,6 +330,16 @@
             <p class="helper-copy">
               Use row overrides to force-include or force-exclude questions regardless of the current filters.
             </p>
+            <label class="field field--full no-print">
+              <span>Search Pool</span>
+              <input
+                id="pool-search"
+                type="search"
+                autocomplete="off"
+                placeholder="Fuzzy search id, prompt, choices, objectives, sources…"
+              />
+              <span id="pool-search-summary" class="field__hint"></span>
+            </label>
             <div class="table-wrap">
               <table class="pool-table">
                 <thead>

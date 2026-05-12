@@ -1,4 +1,5 @@
 import { renderRichTextHtml, stripRichTextMarkup } from "./rich-text.js";
+import { buildQuestionSearchText, fuzzyQueryScore } from "./question-search.js";
 
 const state = {
   activePoolQuestionId: "",
@@ -19,7 +20,12 @@ const state = {
     difficulties: [],
     learningObjectiveIds: [],
     overrides: {},
+    excludeFromExamSetId: "",
   },
+  previousExams: [],
+  derivedExcludeQuestionIds: new Set(),
+  questionHashes: {},
+  poolSearch: "",
 };
 
 const MAX_QUESTIONS_PER_EXAM = 100;
@@ -32,6 +38,35 @@ const elements = {
   examStorePath: document.querySelector("#exam-store-path"),
   errorList: document.querySelector("#generator-error-list"),
   errorPanel: document.querySelector("#generator-errors"),
+  excludeFromExam: document.querySelector("#exclude-from-exam"),
+  restoreFromExam: document.querySelector("#restore-from-exam"),
+  restoreDiffModal: document.querySelector("#restore-diff-modal"),
+  restoreDiffBackdrop: document.querySelector("#restore-diff-backdrop"),
+  restoreDiffSummary: document.querySelector("#restore-diff-summary"),
+  restoreDiffAddedBody: document.querySelector("#restore-diff-added-body"),
+  restoreDiffAddedCount: document.querySelector("#restore-diff-added-count"),
+  restoreDiffRemovedBody: document.querySelector("#restore-diff-removed-body"),
+  restoreDiffRemovedCount: document.querySelector("#restore-diff-removed-count"),
+  restoreDiffModifiedBody: document.querySelector("#restore-diff-modified-body"),
+  restoreDiffModifiedCount: document.querySelector("#restore-diff-modified-count"),
+  restoreDiffAddedBlock: document.querySelector("#restore-diff-added-block"),
+  restoreDiffAddedHeading: document.querySelector("#restore-diff-added-heading"),
+  restoreDiffAddedDescription: document.querySelector("#restore-diff-added-description"),
+  restoreDiffRemovedBlock: document.querySelector("#restore-diff-removed-block"),
+  restoreDiffModifiedBlock: document.querySelector("#restore-diff-modified-block"),
+  restoreDiffDetectionBlock: document.querySelector("#restore-diff-detection-block"),
+  restoreDiffDetection: document.querySelector("#restore-diff-detection"),
+  restoreDiffPreviewWhen: document.querySelector("#restore-diff-preview-when"),
+  restoreDiffPreviewSeed: document.querySelector("#restore-diff-preview-seed"),
+  restoreDiffPreviewCount: document.querySelector("#restore-diff-preview-count"),
+  restoreDiffPreviewVariants: document.querySelector("#restore-diff-preview-variants"),
+  restoreDiffPreviewSources: document.querySelector("#restore-diff-preview-sources"),
+  restoreDiffPreviewDifficulties: document.querySelector("#restore-diff-preview-difficulties"),
+  restoreDiffPreviewObjectives: document.querySelector("#restore-diff-preview-objectives"),
+  restoreDiffPreviewPool: document.querySelector("#restore-diff-preview-pool"),
+  restoreDiffPreviewEligible: document.querySelector("#restore-diff-preview-eligible"),
+  restoreDiffApply: document.querySelector("#restore-diff-apply"),
+  restoreDiffCancel: document.querySelector("#restore-diff-cancel"),
   excludedCount: document.querySelector("#excluded-count"),
   filteredCount: document.querySelector("#filtered-count"),
   generateExams: document.querySelector("#generate-exams"),
@@ -39,6 +74,8 @@ const elements = {
   generationSeed: document.querySelector("#generation-seed"),
   includedCount: document.querySelector("#included-count"),
   objectiveFilters: document.querySelector("#objective-filters"),
+  poolSearch: document.querySelector("#pool-search"),
+  poolSearchSummary: document.querySelector("#pool-search-summary"),
   poolTableBody: document.querySelector("#pool-table-body"),
   poolQuestionBackdrop: document.querySelector("#pool-question-backdrop"),
   poolQuestionDetail: document.querySelector("#pool-question-detail"),
@@ -346,12 +383,19 @@ function availableQuestions() {
   const filteredIds = new Set(filteredQuestions().map((question) => question.id));
   const includeIds = new Set(selectedOverrideIds("include"));
   const excludeIds = new Set(selectedOverrideIds("exclude"));
+  const examExcludeIds = state.derivedExcludeQuestionIds;
 
   return state.quiz.questions.filter((question) => {
     if (excludeIds.has(question.id)) {
       return false;
     }
-    return filteredIds.has(question.id) || includeIds.has(question.id);
+    if (includeIds.has(question.id)) {
+      return true;
+    }
+    if (examExcludeIds.has(question.id)) {
+      return false;
+    }
+    return filteredIds.has(question.id);
   });
 }
 
@@ -362,6 +406,9 @@ function rowStatus(question) {
   }
   if (override === "include") {
     return { label: "Forced In", tone: "include" };
+  }
+  if (state.derivedExcludeQuestionIds.has(question.id)) {
+    return { label: "Excluded (Prev Exam)", tone: "exclude" };
   }
   if (matchesFilters(question)) {
     return { label: "Eligible", tone: "eligible" };
@@ -399,7 +446,15 @@ function updateSummary() {
   elements.filteredCount.textContent = String(filteredQuestions().length);
   elements.availableCount.textContent = String(availableQuestions().length);
   elements.includedCount.textContent = String(selectedOverrideIds("include").length);
-  elements.excludedCount.textContent = String(selectedOverrideIds("exclude").length);
+  const manualExcludes = new Set(selectedOverrideIds("exclude"));
+  const manualIncludes = new Set(selectedOverrideIds("include"));
+  let examExcludeCount = 0;
+  for (const id of state.derivedExcludeQuestionIds) {
+    if (!manualExcludes.has(id) && !manualIncludes.has(id)) {
+      examExcludeCount += 1;
+    }
+  }
+  elements.excludedCount.textContent = String(manualExcludes.size + examExcludeCount);
 }
 
 function renderErrors() {
@@ -598,15 +653,52 @@ function renderFilterGroups() {
 function renderPoolTable() {
   const fragment = document.createDocumentFragment();
   updateStatusSortButton();
-  const sortedQuestions = [...state.quiz.questions].sort((left, right) => {
-    const leftStatus = rowStatus(left);
-    const rightStatus = rowStatus(right);
-    const rankDelta = statusSortRank(leftStatus.tone) - statusSortRank(rightStatus.tone);
-    if (rankDelta !== 0) {
-      return rankDelta;
-    }
-    return String(left.id).localeCompare(String(right.id));
+  const query = state.poolSearch.trim();
+  const totalQuestions = state.quiz.questions.length;
+  const scored = state.quiz.questions.map((question) => {
+    const haystack = buildQuestionSearchText(question, { objectiveLabel });
+    const score = query ? fuzzyQueryScore(haystack, query) : 1;
+    return { question, score };
   });
+  const filtered = query ? scored.filter((entry) => entry.score > 0) : scored;
+  const scoreById = new Map(filtered.map((entry) => [entry.question.id, entry.score]));
+  const sortedQuestions = filtered
+    .map((entry) => entry.question)
+    .sort((left, right) => {
+      if (query) {
+        const scoreDelta = (scoreById.get(right.id) ?? 0) - (scoreById.get(left.id) ?? 0);
+        if (scoreDelta !== 0) {
+          return scoreDelta;
+        }
+      }
+      const leftStatus = rowStatus(left);
+      const rightStatus = rowStatus(right);
+      const rankDelta = statusSortRank(leftStatus.tone) - statusSortRank(rightStatus.tone);
+      if (rankDelta !== 0) {
+        return rankDelta;
+      }
+      return String(left.id).localeCompare(String(right.id));
+    });
+
+  if (elements.poolSearchSummary) {
+    if (!query) {
+      elements.poolSearchSummary.textContent = `${totalQuestions} question${totalQuestions === 1 ? "" : "s"}`;
+    } else {
+      elements.poolSearchSummary.textContent = `${sortedQuestions.length} of ${totalQuestions} match`;
+    }
+  }
+
+  if (sortedQuestions.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 9;
+    cell.className = "cell-copy";
+    cell.textContent = query ? "No questions match this search." : "No questions in this pool.";
+    row.append(cell);
+    fragment.append(row);
+    elements.poolTableBody.replaceChildren(fragment);
+    return;
+  }
 
   for (const question of sortedQuestions) {
     const row = document.createElement("tr");
@@ -790,6 +882,801 @@ function renderPoolState() {
   updateSummary();
 }
 
+function examSetOptionLabel(summary) {
+  const examName = summary.printSettings?.examName || summary.quiz?.title || "Untitled Exam";
+  const when = summary.generatedAt ? new Date(summary.generatedAt).toLocaleString() : "Unknown time";
+  const count = Number.isFinite(summary.selectedQuestionCount) ? summary.selectedQuestionCount : 0;
+  return `${examName} · ${when} · ${count}q`;
+}
+
+function renderPreviousExamSelect() {
+  const excludeFragment = document.createDocumentFragment();
+  const excludeNone = document.createElement("option");
+  excludeNone.value = "";
+  excludeNone.textContent = "None";
+  excludeFragment.append(excludeNone);
+
+  const restoreFragment = document.createDocumentFragment();
+  const restoreNone = document.createElement("option");
+  restoreNone.value = "";
+  restoreNone.textContent = "Select to restore...";
+  restoreFragment.append(restoreNone);
+
+  let hasSelectedMatch = false;
+  for (const summary of state.previousExams) {
+    const label = `${summary.examSetId} — ${examSetOptionLabel(summary)}`;
+
+    const excludeOption = document.createElement("option");
+    excludeOption.value = summary.examSetId;
+    excludeOption.textContent = label;
+    if (summary.examSetId === state.selection.excludeFromExamSetId) {
+      excludeOption.selected = true;
+      hasSelectedMatch = true;
+    }
+    excludeFragment.append(excludeOption);
+
+    const restoreOption = document.createElement("option");
+    restoreOption.value = summary.examSetId;
+    restoreOption.textContent = label;
+    restoreFragment.append(restoreOption);
+  }
+  elements.excludeFromExam.replaceChildren(excludeFragment);
+  if (!hasSelectedMatch) {
+    elements.excludeFromExam.value = "";
+  }
+  elements.restoreFromExam.replaceChildren(restoreFragment);
+  elements.restoreFromExam.value = "";
+}
+
+let pendingRestore = null;
+
+function questionMatchesSavedFilters(question, savedSelection) {
+  const sources = Array.isArray(savedSelection.sources) ? savedSelection.sources : [];
+  if (sources.length > 0) {
+    const qs = questionSources(question);
+    if (!qs.some((source) => sources.includes(source))) {
+      return false;
+    }
+  }
+  const difficulties = Array.isArray(savedSelection.difficulties) ? savedSelection.difficulties : [];
+  if (difficulties.length > 0) {
+    if (!difficulties.includes(question.difficulty)) {
+      return false;
+    }
+  }
+  const objectiveIds = Array.isArray(savedSelection.learningObjectiveIds) ? savedSelection.learningObjectiveIds : [];
+  if (objectiveIds.length > 0) {
+    const qObjectives = Array.isArray(question.learningObjectiveIds) ? question.learningObjectiveIds : [];
+    if (!qObjectives.some((id) => objectiveIds.includes(id))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function normalizeCurrentForDiff(question) {
+  if (!question) return null;
+  return {
+    id: question.id,
+    question: question.question ?? "",
+    choices: (question.choices || []).map((choice) => ({
+      key: choice?.key ?? "",
+      text: choice?.text ?? "",
+    })),
+    correctAnswers: (question.correctAnswers || []).map(String),
+    explanation: question.explanation ?? "",
+    difficulty: question.difficulty,
+    points: question.points,
+    shuffleChoices: Boolean(question.shuffleChoices),
+    learningObjectiveIds: (question.learningObjectiveIds || []).map(String),
+    imageAssetIds: (question.imageAssetIds || []).map(String),
+    locations: Array.isArray(question.locations)
+      ? question.locations
+      : Array.isArray(question.bookLocations) ? question.bookLocations : [],
+  };
+}
+
+const DIFF_FIELDS = [
+  "question",
+  "choices",
+  "correctAnswers",
+  "explanation",
+  "difficulty",
+  "points",
+  "shuffleChoices",
+  "learningObjectiveIds",
+  "imageAssetIds",
+  "locations",
+];
+
+function fieldEquals(a, b) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+function computeChangedFields(vintage, current) {
+  const changed = [];
+  for (const field of DIFF_FIELDS) {
+    if (!fieldEquals(vintage[field], current[field])) {
+      changed.push(field);
+    }
+  }
+  return changed;
+}
+
+function computeRestoreDiff(selection) {
+  const currentQuestions = state.quiz.questions;
+  const currentById = new Map(currentQuestions.map((question) => [question.id, question]));
+  const currentIds = new Set(currentById.keys());
+
+  const hasSnapshot = Array.isArray(selection.poolQuestionIds) && selection.poolQuestionIds.length > 0;
+  const vintageHashes = selection.poolQuestionHashes && typeof selection.poolQuestionHashes === "object"
+    ? selection.poolQuestionHashes
+    : null;
+  const hashesAvailable = Boolean(vintageHashes);
+  const vintageSnapshot = Array.isArray(selection.poolSnapshot) ? selection.poolSnapshot : null;
+  const snapshotAvailable = Boolean(vintageSnapshot);
+  const vintageSnapshotById = snapshotAvailable
+    ? new Map(vintageSnapshot.map((snap) => [snap.id, snap]))
+    : new Map();
+
+  let addedIds = [];
+  let removedIds = [];
+  let addedScope = "exam";
+
+  if (hasSnapshot) {
+    const vintageIds = new Set(selection.poolQuestionIds);
+    addedIds = [...currentIds].filter((id) => !vintageIds.has(id)).sort();
+    removedIds = [...vintageIds].filter((id) => !currentIds.has(id)).sort();
+    addedScope = "pool";
+  } else {
+    const referenced = new Set();
+    for (const key of ["availableQuestionIds", "filteredQuestionIds", "selectedQuestionIds", "includeQuestionIds", "excludeQuestionIds"]) {
+      const list = Array.isArray(selection[key]) ? selection[key] : [];
+      for (const id of list) {
+        referenced.add(id);
+      }
+    }
+    removedIds = [...referenced].filter((id) => !currentIds.has(id)).sort();
+
+    const savedFiltered = new Set(Array.isArray(selection.filteredQuestionIds) ? selection.filteredQuestionIds : []);
+    const currentInScope = currentQuestions.filter((question) => questionMatchesSavedFilters(question, selection));
+    addedIds = currentInScope
+      .map((question) => question.id)
+      .filter((id) => !savedFiltered.has(id))
+      .sort();
+  }
+
+  const addedRows = addedIds.map((id) => ({
+    id,
+    question: currentById.get(id) || null,
+    decision: "allow",
+  }));
+
+  const removedRows = removedIds.map((id) => ({
+    id,
+    vintageSnapshot: vintageSnapshotById.get(id) || null,
+  }));
+
+  const modifiedRows = [];
+  const currentHashById = new Map(
+    Object.entries(state.questionHashes || {}).filter(([, hash]) => typeof hash === "string" && hash !== ""),
+  );
+  if (hashesAvailable) {
+    for (const [id, hash] of Object.entries(vintageHashes)) {
+      if (!currentIds.has(id)) continue;
+      const currentHash = currentHashById.get(id);
+      if (!currentHash || currentHash === hash) continue;
+
+      const currentQuestion = currentById.get(id);
+      const vintage = vintageSnapshotById.get(id) || null;
+      const currentNormalized = normalizeCurrentForDiff(currentQuestion);
+      const changedFields = vintage && currentNormalized
+        ? computeChangedFields(vintage, currentNormalized)
+        : [];
+      modifiedRows.push({
+        id,
+        currentQuestion,
+        currentNormalized,
+        vintageSnapshot: vintage,
+        changedFields,
+        decision: "keep",
+      });
+    }
+    modifiedRows.sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  }
+
+  const currentScopeCount = currentQuestions.filter((question) => questionMatchesSavedFilters(question, selection)).length;
+
+  return {
+    vintageSource: hasSnapshot ? "snapshot" : "fallback",
+    hashesAvailable,
+    snapshotAvailable,
+    added: addedIds,
+    removed: removedIds,
+    modified: modifiedRows.map((row) => row.id),
+    addedRows,
+    removedRows,
+    modifiedRows,
+    addedScope,
+    currentScopeCount,
+    currentPoolCount: currentQuestions.length,
+  };
+}
+
+function closeRestoreDiffModal() {
+  pendingRestore = null;
+  elements.restoreDiffModal.classList.remove("is-open");
+  elements.restoreDiffModal.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
+}
+
+function describeFilterList(values, fallback) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return fallback;
+  }
+  if (values.length <= 6) {
+    return values.join(", ");
+  }
+  return `${values.slice(0, 6).join(", ")} (+${values.length - 6} more)`;
+}
+
+function describeObjectives(objectiveIds) {
+  if (!Array.isArray(objectiveIds) || objectiveIds.length === 0) {
+    return "Any objective";
+  }
+  const labels = objectiveIds.map((id) => {
+    const label = objectiveLabel(id);
+    return label && label !== id ? `${id} · ${label}` : id;
+  });
+  return describeFilterList(labels, "Any objective");
+}
+
+const DIFF_FIELD_LABELS = {
+  question: "Prompt",
+  choices: "Choices",
+  correctAnswers: "Correct answers",
+  explanation: "Explanation",
+  difficulty: "Difficulty",
+  points: "Points",
+  shuffleChoices: "Shuffle choices",
+  learningObjectiveIds: "Objectives",
+  imageAssetIds: "Images",
+  locations: "Sources",
+};
+
+function diffValueToText(field, value) {
+  if (value === null || value === undefined) return "—";
+  if (field === "choices" && Array.isArray(value)) {
+    if (value.length === 0) return "—";
+    return value.map((choice) => `${choice.key ?? ""}: ${stripRichTextMarkup(choice.text ?? "")}`).join(" | ");
+  }
+  if (field === "locations" && Array.isArray(value)) {
+    if (value.length === 0) return "—";
+    return value
+      .map((location) => {
+        const chapter = location?.chapter || location?.source || "";
+        const section = location?.section || "";
+        const page = location?.page ? `Page ${location.page}` : "";
+        const url = location?.url || "";
+        return [chapter, section, page, url].filter(Boolean).join(" · ") || "—";
+      })
+      .join(" | ");
+  }
+  if (field === "correctAnswers" && Array.isArray(value)) {
+    return value.length ? value.join(", ") : "—";
+  }
+  if (field === "learningObjectiveIds" && Array.isArray(value)) {
+    return value.length ? value.join(", ") : "—";
+  }
+  if (field === "imageAssetIds" && Array.isArray(value)) {
+    return value.length ? value.join(", ") : "—";
+  }
+  if (field === "shuffleChoices") {
+    return value ? "Yes" : "No";
+  }
+  if (field === "question" || field === "explanation") {
+    return stripRichTextMarkup(String(value)) || "—";
+  }
+  if (Array.isArray(value)) return value.length ? JSON.stringify(value) : "—";
+  return String(value);
+}
+
+function shortSources(question) {
+  if (!question) return "—";
+  return questionSources(question).join(", ") || "—";
+}
+
+function shortVintageSources(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.locations) || snapshot.locations.length === 0) return "—";
+  return snapshot.locations
+    .map((location) => location?.chapter || location?.source || "")
+    .filter(Boolean)
+    .join(", ") || "—";
+}
+
+function shortObjectives(objectiveIds) {
+  if (!Array.isArray(objectiveIds) || objectiveIds.length === 0) return "—";
+  return objectiveIds
+    .map((id) => {
+      const label = objectiveLabel(id);
+      return label && label !== id ? `${id} · ${truncate(label, 28)}` : id;
+    })
+    .join(", ");
+}
+
+function createPerRowSelect(decision, optionPairs, onChange) {
+  const select = document.createElement("select");
+  select.className = "inline-select";
+  for (const [value, label] of optionPairs) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    if (value === decision) option.selected = true;
+    select.append(option);
+  }
+  select.addEventListener("change", (event) => onChange(event.target.value));
+  return select;
+}
+
+function createAddedRow(row, onDecisionChange) {
+  const tr = document.createElement("tr");
+  const idCell = document.createElement("td");
+  idCell.className = "cell-mono";
+  idCell.textContent = row.id;
+
+  const promptCell = document.createElement("td");
+  promptCell.className = "cell-copy";
+  promptCell.textContent = truncate(stripRichTextMarkup(row.question?.question ?? ""), 140) || "—";
+
+  const difficultyCell = document.createElement("td");
+  difficultyCell.textContent = row.question?.difficulty ?? "—";
+
+  const pointsCell = document.createElement("td");
+  pointsCell.textContent = row.question?.points ?? "—";
+
+  const sourcesCell = document.createElement("td");
+  sourcesCell.className = "cell-copy";
+  sourcesCell.textContent = shortSources(row.question);
+
+  const objectivesCell = document.createElement("td");
+  objectivesCell.className = "cell-copy";
+  objectivesCell.textContent = shortObjectives(row.question?.learningObjectiveIds);
+
+  const actionCell = document.createElement("td");
+  actionCell.append(createPerRowSelect(row.decision, [["allow", "Allow"], ["exclude", "Force-exclude"]], onDecisionChange));
+
+  tr.append(idCell, promptCell, difficultyCell, pointsCell, sourcesCell, objectivesCell, actionCell);
+  return tr;
+}
+
+function createDiffPane(row) {
+  const wrap = document.createElement("div");
+  wrap.className = "diff-pane";
+
+  if (!row.vintageSnapshot) {
+    const note = document.createElement("p");
+    note.className = "helper-copy";
+    note.textContent = "No vintage snapshot recorded — cannot show before/after.";
+    wrap.append(note);
+    return wrap;
+  }
+
+  for (const field of row.changedFields) {
+    const label = DIFF_FIELD_LABELS[field] || field;
+    const fieldRow = document.createElement("div");
+    fieldRow.className = "diff-row";
+
+    const fieldName = document.createElement("div");
+    fieldName.className = "diff-row__field";
+    fieldName.textContent = label;
+
+    const before = document.createElement("div");
+    before.className = "diff-row__was";
+    before.textContent = diffValueToText(field, row.vintageSnapshot[field]);
+
+    const after = document.createElement("div");
+    after.className = "diff-row__now";
+    after.textContent = diffValueToText(field, row.currentNormalized?.[field]);
+
+    fieldRow.append(fieldName, before, after);
+    wrap.append(fieldRow);
+  }
+  return wrap;
+}
+
+function createModifiedRow(row, onDecisionChange) {
+  const tr = document.createElement("tr");
+
+  const idCell = document.createElement("td");
+  idCell.className = "cell-mono";
+  idCell.textContent = row.id;
+
+  const fieldsCell = document.createElement("td");
+  fieldsCell.className = "cell-copy";
+  if (row.changedFields.length === 0) {
+    fieldsCell.textContent = "(content changed — fields unknown)";
+  } else {
+    for (const field of row.changedFields) {
+      const badge = document.createElement("span");
+      badge.className = "status-badge status-badge--filtered diff-field-badge";
+      badge.textContent = DIFF_FIELD_LABELS[field] || field;
+      fieldsCell.append(badge);
+    }
+  }
+
+  const promptCell = document.createElement("td");
+  promptCell.className = "cell-copy";
+  promptCell.textContent = truncate(stripRichTextMarkup(row.currentQuestion?.question ?? ""), 120) || "—";
+
+  const diffCell = document.createElement("td");
+  if (row.vintageSnapshot && row.changedFields.length > 0) {
+    const details = document.createElement("details");
+    details.className = "diff-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "Show diff";
+    details.append(summary);
+    details.append(createDiffPane(row));
+    diffCell.append(details);
+  } else if (!row.vintageSnapshot) {
+    diffCell.textContent = "Vintage content not recorded";
+    diffCell.className = "helper-copy";
+  } else {
+    diffCell.textContent = "—";
+  }
+
+  const actionCell = document.createElement("td");
+  actionCell.append(createPerRowSelect(row.decision, [["keep", "Keep current"], ["exclude", "Force-exclude"]], onDecisionChange));
+
+  tr.append(idCell, fieldsCell, promptCell, diffCell, actionCell);
+  return tr;
+}
+
+function createRemovedRow(row) {
+  const tr = document.createElement("tr");
+  const idCell = document.createElement("td");
+  idCell.className = "cell-mono";
+  idCell.textContent = row.id;
+
+  const snapshot = row.vintageSnapshot;
+  const promptCell = document.createElement("td");
+  promptCell.className = "cell-copy";
+  promptCell.textContent = snapshot
+    ? truncate(stripRichTextMarkup(snapshot.question ?? ""), 140) || "—"
+    : "Vintage content not recorded";
+
+  const difficultyCell = document.createElement("td");
+  difficultyCell.textContent = snapshot?.difficulty ?? "—";
+
+  const pointsCell = document.createElement("td");
+  pointsCell.textContent = snapshot?.points ?? "—";
+
+  const sourcesCell = document.createElement("td");
+  sourcesCell.className = "cell-copy";
+  sourcesCell.textContent = shortVintageSources(snapshot);
+
+  const objectivesCell = document.createElement("td");
+  objectivesCell.className = "cell-copy";
+  objectivesCell.textContent = shortObjectives(snapshot?.learningObjectiveIds);
+
+  tr.append(idCell, promptCell, difficultyCell, pointsCell, sourcesCell, objectivesCell);
+  return tr;
+}
+
+function renderAddedRows() {
+  const fragment = document.createDocumentFragment();
+  for (const row of pendingRestore.addedRows) {
+    fragment.append(createAddedRow(row, (value) => {
+      row.decision = value;
+    }));
+  }
+  elements.restoreDiffAddedBody.replaceChildren(fragment);
+}
+
+function renderModifiedRows() {
+  const fragment = document.createDocumentFragment();
+  for (const row of pendingRestore.modifiedRows) {
+    fragment.append(createModifiedRow(row, (value) => {
+      row.decision = value;
+    }));
+  }
+  elements.restoreDiffModifiedBody.replaceChildren(fragment);
+}
+
+function renderRemovedRows() {
+  const fragment = document.createDocumentFragment();
+  for (const row of pendingRestore.removedRows) {
+    fragment.append(createRemovedRow(row));
+  }
+  elements.restoreDiffRemovedBody.replaceChildren(fragment);
+}
+
+function applyBulkDecision(target, decision) {
+  if (!pendingRestore) return;
+  if (target === "added") {
+    for (const row of pendingRestore.addedRows) row.decision = decision;
+    renderAddedRows();
+  } else if (target === "modified") {
+    for (const row of pendingRestore.modifiedRows) row.decision = decision;
+    renderModifiedRows();
+  }
+}
+
+function openRestoreDiffModal(examSetId, summary, selection, diff) {
+  const {
+    addedRows,
+    modifiedRows,
+    removedRows,
+    added,
+    removed,
+    modified,
+    vintageSource,
+    hashesAvailable,
+    snapshotAvailable,
+    addedScope,
+    currentScopeCount,
+    currentPoolCount,
+  } = diff;
+  pendingRestore = {
+    examSetId,
+    selection,
+    addedRows,
+    modifiedRows,
+    removedRows,
+    added,
+    removed,
+    modified,
+    vintageSource,
+    hashesAvailable,
+    snapshotAvailable,
+  };
+
+  const summaryParts = [];
+  summaryParts.push(`Restoring from <strong>${escapeHtml(examSetId)}</strong>.`);
+  if (vintageSource === "snapshot") {
+    summaryParts.push("This exam recorded a full pool snapshot, so the diff below is exact.");
+  } else {
+    summaryParts.push("This exam predates pool snapshots, so its diff is reconstructed from the filter scope it was generated under (less precise — see Detection mode below).");
+  }
+  elements.restoreDiffSummary.innerHTML = summaryParts.join(" ");
+
+  const generatedAt = summary?.generatedAt || selection.generatedAt || "";
+  elements.restoreDiffPreviewWhen.textContent = generatedAt ? new Date(generatedAt).toLocaleString() : "Unknown";
+  elements.restoreDiffPreviewSeed.textContent = (selection.generationSeed && String(selection.generationSeed)) || "—";
+  elements.restoreDiffPreviewCount.textContent = String(selection.questionCount ?? "—");
+  elements.restoreDiffPreviewVariants.textContent = String(selection.variantCount ?? "—");
+  elements.restoreDiffPreviewSources.textContent = describeFilterList(selection.sources, "Any source");
+  elements.restoreDiffPreviewDifficulties.textContent = describeFilterList(
+    Array.isArray(selection.difficulties) ? selection.difficulties.map(String) : [],
+    "Any difficulty",
+  );
+  elements.restoreDiffPreviewObjectives.textContent = describeObjectives(selection.learningObjectiveIds);
+  const vintagePoolSize = Array.isArray(selection.poolQuestionIds) ? selection.poolQuestionIds.length : null;
+  elements.restoreDiffPreviewPool.textContent = vintagePoolSize !== null
+    ? `${vintagePoolSize} questions then · ${currentPoolCount} now`
+    : `Unknown then · ${currentPoolCount} now`;
+  const vintageAvailable = Array.isArray(selection.availableQuestionIds) ? selection.availableQuestionIds.length : null;
+  const vintageSelected = Array.isArray(selection.selectedQuestionIds) ? selection.selectedQuestionIds.length : null;
+  const eligibleParts = [];
+  if (vintageAvailable !== null) eligibleParts.push(`${vintageAvailable} eligible then`);
+  eligibleParts.push(`${currentScopeCount} match the saved filters now`);
+  if (vintageSelected !== null) eligibleParts.push(`${vintageSelected} chosen for the exam`);
+  elements.restoreDiffPreviewEligible.textContent = eligibleParts.join(" · ");
+
+  const detectionLines = [];
+  if (vintageSource === "snapshot") {
+    detectionLines.push("Pool changes: exact. Additions and removals are detected against the full pool snapshot saved with this exam.");
+  } else {
+    detectionLines.push("Pool changes: scope-restricted. We re-apply the exam's saved filters to today's pool and compare against the filtered IDs that were recorded. Questions outside the saved filter scope are ignored here, even if they were added to the pool since.");
+  }
+  if (hashesAvailable) {
+    detectionLines.push("Edits: exact. Each question's current content hash is compared against the hash recorded when this exam was generated.");
+  } else {
+    detectionLines.push("Edits: unavailable. Content hashes were not recorded for this exam, so we can't tell which questions have been edited. Edited questions will silently use their current content if you allow them.");
+  }
+  elements.restoreDiffDetection.textContent = detectionLines.join(" ");
+
+  const addedHeadingText = addedScope === "pool"
+    ? "New questions added to the pool"
+    : "Newly eligible questions (filter-scope estimate)";
+  elements.restoreDiffAddedHeading.firstChild.nodeValue = `${addedHeadingText} `;
+  elements.restoreDiffAddedDescription.textContent = addedScope === "pool"
+    ? "These IDs exist in the pool today but were not in the pool when this exam was generated."
+    : "These questions match this exam's saved filters today but were not in its recorded filter result. They are most likely additions to the pool, but could also include questions whose metadata was edited so they now match the filters.";
+
+  elements.restoreDiffAddedCount.textContent = `(${added.length})`;
+  elements.restoreDiffRemovedCount.textContent = `(${removed.length})`;
+  elements.restoreDiffModifiedCount.textContent = hashesAvailable ? `(${modified.length})` : "(unavailable)";
+
+  elements.restoreDiffAddedBlock.hidden = added.length === 0;
+  elements.restoreDiffRemovedBlock.hidden = removed.length === 0;
+  elements.restoreDiffModifiedBlock.hidden = !hashesAvailable || modified.length === 0;
+
+  renderAddedRows();
+  renderModifiedRows();
+  renderRemovedRows();
+
+  elements.restoreDiffModal.classList.add("is-open");
+  elements.restoreDiffModal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+}
+
+function applyRestoredSelection(examSetId, selection, applyOptions) {
+  const {
+    strictExclusionIds = [],
+    excludeModifiedIds = [],
+    addedCount = 0,
+    removedCount = 0,
+    modifiedCount = 0,
+    keptEditsCount = 0,
+    vintageSource,
+    hashesAvailable = true,
+  } = applyOptions;
+  const filterOpts = filterOptions();
+  const sourceSet = new Set(filterOpts.sources);
+  const difficultySet = new Set(filterOpts.difficulties);
+  const objectiveSet = new Set(filterOpts.learningObjectives.map((objective) => objective.id));
+  const questionIdSet = new Set(state.quiz.questions.map((question) => question.id));
+
+  const restoredCount = Number.parseInt(selection.questionCount, 10);
+  state.selection.questionCount = Math.min(
+    MAX_QUESTIONS_PER_EXAM,
+    Math.max(1, Number.isFinite(restoredCount) ? restoredCount : state.selection.questionCount),
+  );
+  const restoredVariants = Number.parseInt(selection.variantCount, 10);
+  state.selection.variantCount = Math.max(
+    1,
+    Number.isFinite(restoredVariants) ? restoredVariants : state.selection.variantCount,
+  );
+  state.selection.generationSeed = typeof selection.generationSeed === "string"
+    ? selection.generationSeed.slice(0, 128)
+    : "";
+  state.selection.sources = Array.isArray(selection.sources)
+    ? dedupe(selection.sources.filter((source) => sourceSet.has(source)))
+    : [];
+  state.selection.difficulties = Array.isArray(selection.difficulties)
+    ? dedupe(selection.difficulties.filter((difficulty) => difficultySet.has(difficulty))).sort((left, right) => left - right)
+    : [];
+  state.selection.learningObjectiveIds = Array.isArray(selection.learningObjectiveIds)
+    ? dedupe(selection.learningObjectiveIds.filter((objectiveId) => objectiveSet.has(objectiveId)))
+    : [];
+  state.selection.overrides = {};
+  const includeIds = Array.isArray(selection.includeQuestionIds) ? selection.includeQuestionIds : [];
+  const excludeIds = Array.isArray(selection.excludeQuestionIds) ? selection.excludeQuestionIds : [];
+  for (const id of includeIds) {
+    if (questionIdSet.has(id)) {
+      state.selection.overrides[id] = "include";
+    }
+  }
+  for (const id of excludeIds) {
+    if (questionIdSet.has(id)) {
+      state.selection.overrides[id] = "exclude";
+    }
+  }
+  let strictAppliedCount = 0;
+  for (const id of strictExclusionIds) {
+    if (questionIdSet.has(id) && state.selection.overrides[id] !== "include") {
+      state.selection.overrides[id] = "exclude";
+      strictAppliedCount += 1;
+    }
+  }
+  let modifiedAppliedCount = 0;
+  for (const id of excludeModifiedIds) {
+    if (questionIdSet.has(id) && state.selection.overrides[id] !== "include") {
+      state.selection.overrides[id] = "exclude";
+      modifiedAppliedCount += 1;
+    }
+  }
+  state.selection.excludeFromExamSetId = "";
+  state.derivedExcludeQuestionIds = new Set();
+
+  elements.questionCount.value = String(state.selection.questionCount);
+  elements.variantCount.value = String(state.selection.variantCount);
+  elements.generationSeed.value = state.selection.generationSeed;
+
+  renderPreviousExamSelect();
+  renderPoolState();
+  scheduleDraftSave();
+
+  const statusParts = [`Restored settings from ${examSetId}.`];
+  if (strictAppliedCount > 0) {
+    statusParts.push(`Force-excluded ${strictAppliedCount} new question${strictAppliedCount === 1 ? "" : "s"} (post-vintage).`);
+  } else if (addedCount > 0) {
+    statusParts.push(`${addedCount} newer question${addedCount === 1 ? "" : "s"} left eligible.`);
+  }
+  if (modifiedAppliedCount > 0) {
+    statusParts.push(`Force-excluded ${modifiedAppliedCount} edited question${modifiedAppliedCount === 1 ? "" : "s"}.`);
+  } else if (modifiedCount > 0) {
+    statusParts.push(`${keptEditsCount || modifiedCount} edited question${(keptEditsCount || modifiedCount) === 1 ? " was" : "s were"} kept with current content.`);
+  }
+  if (removedCount > 0) {
+    statusParts.push(`${removedCount} vintage question${removedCount === 1 ? "" : "s"} no longer in the pool were skipped.`);
+  }
+  if (vintageSource === "fallback") {
+    statusParts.push("Added/removed diff was approximated (legacy exam without pool snapshot).");
+  }
+  if (!hashesAvailable) {
+    statusParts.push("Edit detection was unavailable for this exam.");
+  }
+  setStatus(statusParts.join(" "));
+}
+
+async function restoreFromExamSet(examSetId) {
+  if (!examSetId || !state.quiz) {
+    return;
+  }
+  setStatus(`Restoring settings from ${examSetId}...`);
+  let payload;
+  try {
+    const response = await fetch(`/api/exams/set/${encodeURIComponent(examSetId)}`);
+    if (!response.ok) {
+      setStatus(`Could not restore from ${examSetId}.`, true);
+      return;
+    }
+    payload = await response.json();
+  } catch (error) {
+    console.error(error);
+    setStatus(`Could not restore from ${examSetId}: ${error.message}`, true);
+    return;
+  }
+
+  const selection = payload.examSet?.selection ?? {};
+  const summary = payload.summary ?? payload.examSet ?? null;
+  const diff = computeRestoreDiff(selection);
+
+  if (diff.added.length === 0 && diff.removed.length === 0 && diff.modified.length === 0) {
+    applyRestoredSelection(examSetId, selection, {
+      addedCount: 0,
+      removedCount: 0,
+      modifiedCount: 0,
+      vintageSource: diff.vintageSource,
+      hashesAvailable: diff.hashesAvailable,
+    });
+    return;
+  }
+
+  openRestoreDiffModal(examSetId, summary, selection, diff);
+}
+
+async function loadPreviousExams() {
+  try {
+    const response = await fetch("/api/exams");
+    if (!response.ok) {
+      state.previousExams = [];
+      return;
+    }
+    const payload = await response.json();
+    state.previousExams = Array.isArray(payload.examSets) ? payload.examSets : [];
+  } catch (error) {
+    console.warn("Could not load previous exams", error);
+    state.previousExams = [];
+  }
+}
+
+async function refreshDerivedExcludes() {
+  const examSetId = state.selection.excludeFromExamSetId;
+  if (!examSetId) {
+    state.derivedExcludeQuestionIds = new Set();
+    return;
+  }
+  try {
+    const response = await fetch(`/api/exams/set/${encodeURIComponent(examSetId)}`);
+    if (!response.ok) {
+      state.derivedExcludeQuestionIds = new Set();
+      state.selection.excludeFromExamSetId = "";
+      return;
+    }
+    const payload = await response.json();
+    const ids = Array.isArray(payload.examSet?.selection?.selectedQuestionIds)
+      ? payload.examSet.selection.selectedQuestionIds
+      : [];
+    const pool = new Set(state.quiz?.questions?.map((question) => question.id) ?? []);
+    state.derivedExcludeQuestionIds = new Set(ids.filter((id) => pool.has(id)));
+  } catch (error) {
+    console.warn("Could not load previous exam questions", error);
+    state.derivedExcludeQuestionIds = new Set();
+  }
+}
+
 function generatedExamViewerUrl(examSetId) {
   return `/viewer.html?examSetId=${encodeURIComponent(examSetId)}`;
 }
@@ -838,6 +1725,7 @@ function currentDraft() {
       difficulties: [...state.selection.difficulties],
       learningObjectiveIds: [...state.selection.learningObjectiveIds],
       overrides: { ...state.selection.overrides },
+      excludeFromExamSetId: state.selection.excludeFromExamSetId,
     },
     statusSortDirection: state.statusSortDirection,
     lastGeneratedExamSetId: state.generatedRun?.examSetId ?? "",
@@ -913,6 +1801,9 @@ function applyGeneratorDraft(draft) {
       }
     }
   }
+  state.selection.excludeFromExamSetId = typeof selection.excludeFromExamSetId === "string"
+    ? selection.excludeFromExamSetId.trim()
+    : "";
 
   state.statusSortDirection = draft.statusSortDirection === "reverse" ? "reverse" : "default";
 }
@@ -942,6 +1833,9 @@ async function loadQuiz() {
   }
   const payload = await response.json();
   state.quiz = payload.quiz;
+  state.questionHashes = payload.questionHashes && typeof payload.questionHashes === "object"
+    ? payload.questionHashes
+    : {};
   state.dbPath = payload.dbPath;
   state.examStorePath = payload.examStorePath;
   state.selection.questionCount = Math.max(1, Math.min(10, state.quiz.questions.length));
@@ -950,11 +1844,18 @@ async function loadQuiz() {
   const draft = await loadGeneratorDraft();
   applyGeneratorDraft(draft);
   await restoreGeneratedRunFromDraft(draft);
+  await loadPreviousExams();
+  if (state.selection.excludeFromExamSetId
+    && !state.previousExams.some((summary) => summary.examSetId === state.selection.excludeFromExamSetId)) {
+    state.selection.excludeFromExamSetId = "";
+  }
+  await refreshDerivedExcludes();
   elements.dbPath.textContent = payload.projectPath ?? state.dbPath;
   elements.examStorePath.textContent = payload.projectPath ?? state.examStorePath;
   elements.questionCount.value = String(state.selection.questionCount);
   elements.variantCount.value = String(state.selection.variantCount);
   elements.generationSeed.value = state.selection.generationSeed;
+  renderPreviousExamSelect();
   renderPoolState();
   renderGeneratedRun();
   setStatus("Quiz pool loaded.");
@@ -977,6 +1878,16 @@ async function generateExams() {
     return;
   }
 
+  const manualIncludes = selectedOverrideIds("include");
+  const manualIncludeSet = new Set(manualIncludes);
+  const manualExcludes = selectedOverrideIds("exclude");
+  const mergedExcludes = new Set(manualExcludes);
+  for (const id of state.derivedExcludeQuestionIds) {
+    if (!manualIncludeSet.has(id)) {
+      mergedExcludes.add(id);
+    }
+  }
+
   const payload = {
     questionCount: Number.parseInt(elements.questionCount.value, 10),
     variantCount: Number.parseInt(elements.variantCount.value, 10),
@@ -984,8 +1895,8 @@ async function generateExams() {
     sources: [...state.selection.sources],
     difficulties: [...state.selection.difficulties],
     learningObjectiveIds: [...state.selection.learningObjectiveIds],
-    includeQuestionIds: selectedOverrideIds("include"),
-    excludeQuestionIds: selectedOverrideIds("exclude"),
+    includeQuestionIds: manualIncludes,
+    excludeQuestionIds: [...mergedExcludes],
   };
 
   const response = await fetch("/api/exams/generate", {
@@ -1010,6 +1921,8 @@ async function generateExams() {
   state.validationErrors = [];
   renderErrors();
   renderGeneratedRun();
+  await loadPreviousExams();
+  renderPreviousExamSelect();
   scheduleDraftSave();
   setStatus(`Generated exam set ${result.examSetId}. Open it in Exam Viewer for details and export.`);
 }
@@ -1053,6 +1966,13 @@ function wireEvents() {
     }
   });
 
+  elements.poolSearch.addEventListener("input", (event) => {
+    state.poolSearch = event.target.value;
+    if (state.quiz) {
+      renderPoolTable();
+    }
+  });
+
   elements.selectVisibleSources.addEventListener("click", () => {
     if (!state.quiz) {
       return;
@@ -1067,6 +1987,27 @@ function wireEvents() {
     state.selection.sources = [];
     renderPoolState();
     scheduleDraftSave();
+  });
+
+  elements.restoreFromExam.addEventListener("change", async (event) => {
+    const examSetId = event.target.value;
+    event.target.value = "";
+    if (examSetId) {
+      await restoreFromExamSet(examSetId);
+    }
+  });
+
+  elements.excludeFromExam.addEventListener("change", async (event) => {
+    state.selection.excludeFromExamSetId = event.target.value;
+    await refreshDerivedExcludes();
+    renderPreviousExamSelect();
+    renderPoolState();
+    scheduleDraftSave();
+    if (state.selection.excludeFromExamSetId) {
+      setStatus(`Excluding ${state.derivedExcludeQuestionIds.size} questions used in ${state.selection.excludeFromExamSetId}.`);
+    } else {
+      setStatus("Previous-exam exclusion cleared.");
+    }
   });
 
   elements.generateExams.addEventListener("click", async () => {
@@ -1094,9 +2035,56 @@ function wireEvents() {
     closePoolQuestionModal();
   });
 
+  elements.restoreDiffApply.addEventListener("click", () => {
+    if (!pendingRestore) {
+      closeRestoreDiffModal();
+      return;
+    }
+    const { examSetId, selection, addedRows, modifiedRows, removedRows, vintageSource, hashesAvailable } = pendingRestore;
+    const excludeAdded = addedRows.filter((row) => row.decision === "exclude").map((row) => row.id);
+    const excludeModified = modifiedRows.filter((row) => row.decision === "exclude").map((row) => row.id);
+    const keptEdits = modifiedRows.filter((row) => row.decision === "keep").length;
+    closeRestoreDiffModal();
+    applyRestoredSelection(examSetId, selection, {
+      strictExclusionIds: excludeAdded,
+      excludeModifiedIds: excludeModified,
+      addedCount: addedRows.length,
+      removedCount: removedRows.length,
+      modifiedCount: modifiedRows.length,
+      keptEditsCount: keptEdits,
+      vintageSource,
+      hashesAvailable,
+    });
+  });
+
+  for (const button of elements.restoreDiffModal.querySelectorAll("[data-bulk]")) {
+    button.addEventListener("click", () => {
+      const target = button.dataset.bulk;
+      const decision = button.dataset.decision;
+      applyBulkDecision(target, decision);
+    });
+  }
+
+  elements.restoreDiffCancel.addEventListener("click", () => {
+    closeRestoreDiffModal();
+    setStatus("Restore cancelled.");
+  });
+
+  elements.restoreDiffBackdrop.addEventListener("click", () => {
+    closeRestoreDiffModal();
+    setStatus("Restore cancelled.");
+  });
+
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.activePoolQuestionId) {
-      closePoolQuestionModal();
+    if (event.key === "Escape") {
+      if (pendingRestore) {
+        closeRestoreDiffModal();
+        setStatus("Restore cancelled.");
+        return;
+      }
+      if (state.activePoolQuestionId) {
+        closePoolQuestionModal();
+      }
     }
   });
 }
