@@ -899,6 +899,13 @@ textarea {
   color: var(--accent-strong);
 }
 
+.page-link.is-disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.58;
+  pointer-events: none;
+}
+
 .page-shell {
   display: flex;
   flex-direction: column;
@@ -1946,6 +1953,18 @@ textarea {
   border-color: rgba(53, 93, 128, 0.28);
   box-shadow: 0 26px 52px rgba(53, 93, 128, 0.18);
   transform: translateY(-2px);
+}
+
+.tool-card.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.tool-card.is-disabled:hover {
+  border-color: rgba(79, 127, 168, 0.18);
+  box-shadow: 0 20px 44px rgba(53, 93, 128, 0.12);
+  transform: none;
 }
 
 .tool-card__kicker {

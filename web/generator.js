@@ -4,7 +4,6 @@ import { buildQuestionSearchText, fuzzyQueryScore } from "./question-search.js";
 const state = {
   activePoolQuestionId: "",
   dbPath: "",
-  examStorePath: "",
   generatedRun: null,
   quiz: null,
   sourceSearch: "",
@@ -35,7 +34,6 @@ const elements = {
   clearSourceFilters: document.querySelector("#clear-source-filters"),
   dbPath: document.querySelector("#db-path"),
   difficultyFilters: document.querySelector("#difficulty-filters"),
-  examStorePath: document.querySelector("#exam-store-path"),
   errorList: document.querySelector("#generator-error-list"),
   errorPanel: document.querySelector("#generator-errors"),
   excludeFromExam: document.querySelector("#exclude-from-exam"),
@@ -1837,7 +1835,6 @@ async function loadQuiz() {
     ? payload.questionHashes
     : {};
   state.dbPath = payload.dbPath;
-  state.examStorePath = payload.examStorePath;
   state.selection.questionCount = Math.max(1, Math.min(10, state.quiz.questions.length));
   state.selection.questionCount = Math.min(state.selection.questionCount, MAX_QUESTIONS_PER_EXAM);
   state.selection.variantCount = 1;
@@ -1851,7 +1848,6 @@ async function loadQuiz() {
   }
   await refreshDerivedExcludes();
   elements.dbPath.textContent = payload.projectPath ?? state.dbPath;
-  elements.examStorePath.textContent = payload.projectPath ?? state.examStorePath;
   elements.questionCount.value = String(state.selection.questionCount);
   elements.variantCount.value = String(state.selection.variantCount);
   elements.generationSeed.value = state.selection.generationSeed;

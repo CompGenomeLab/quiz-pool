@@ -1,13 +1,19 @@
 import base64
+from http import HTTPStatus
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 import tempfile
+from threading import Thread
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
 from src.quiz_pool.main import (
     AppState,
     UploadedFile,
+    build_handler,
     clear_grading_uploads,
     delete_project_grading_run,
     grading_upload_label,
@@ -18,9 +24,12 @@ from src.quiz_pool.main import (
     load_internal_schema,
     load_project_generator_draft,
     normalize_system_file_dialog_request,
+    normalize_system_file_dialog_selected_path,
     normalize_print_settings_payload,
+    parse_args,
     parse_multipart_uploads,
     replace_grading_uploads,
+    set_active_project,
     system_file_dialog_allowed,
     store_project_asset,
     find_project_exam_set,
@@ -41,6 +50,53 @@ ONE_PIXEL_PNG = base64.b64decode(
 
 
 class ProjectStorageTests(unittest.TestCase):
+    def test_parse_args_without_project_leaves_project_unset(self) -> None:
+        with patch("sys.argv", ["quiz_pool"]):
+            args = parse_args()
+
+        self.assertIsNone(args.project)
+
+    def test_set_active_project_creates_user_selected_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir) / "new-course.quizpool"
+            state = AppState(
+                db_path=None,
+                exam_store_path=None,
+                project_path=None,
+                validator=Draft202012Validator(load_internal_schema()),
+            )
+
+            set_active_project(state, project_path=project_path)
+
+            self.assertTrue(project_path.is_file())
+            self.assertEqual(state.project_path, project_path)
+            self.assertEqual(state.db_path, project_path)
+            self.assertEqual(state.exam_store_path, project_path)
+
+    def test_tool_pages_redirect_to_welcome_without_active_project(self) -> None:
+        state = AppState(
+            db_path=None,
+            exam_store_path=None,
+            project_path=None,
+            validator=Draft202012Validator(load_internal_schema()),
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(state))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        try:
+            connection.request("GET", "/generator.html")
+            response = connection.getresponse()
+
+            self.assertEqual(response.status, HTTPStatus.SEE_OTHER)
+            self.assertEqual(response.getheader("Location"), "/")
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
     def test_empty_project_starts_without_questions_and_can_import_quiz(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_path = Path(temp_dir) / "course.quizpool"
@@ -197,11 +253,13 @@ class ProjectStorageTests(unittest.TestCase):
             project_path = temp_path / "course.quizpool"
             quiz_json_path = temp_path / "quiz.json"
             pdf_path = temp_path / "scan.pdf"
+            new_project_path = temp_path / "new-course.quizpool"
             project_path.write_text("", encoding="utf-8")
             quiz_json_path.write_text("{}", encoding="utf-8")
             pdf_path.write_bytes(b"%PDF-1.7\n")
 
             self.assertTrue(system_file_dialog_allowed(project_path, "project", "file"))
+            self.assertTrue(system_file_dialog_allowed(new_project_path, "project", "save-file"))
             self.assertTrue(system_file_dialog_allowed(quiz_json_path, "quiz-json", "file"))
             self.assertTrue(system_file_dialog_allowed(pdf_path, "pdf-or-dir", "file"))
             self.assertTrue(system_file_dialog_allowed(temp_path, "pdf-or-dir", "directory"))
@@ -217,6 +275,22 @@ class ProjectStorageTests(unittest.TestCase):
 
         self.assertIsNone(request)
         self.assertEqual(errors[0]["path"], "mode")
+
+    def test_system_file_dialog_save_path_adds_project_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            request, errors = normalize_system_file_dialog_request(
+                {"purpose": "project", "mode": "save-file"},
+                fallback_path=Path(temp_dir),
+            )
+
+            self.assertEqual(errors, [])
+            self.assertIsNotNone(request)
+            selected_path = normalize_system_file_dialog_selected_path(
+                str(Path(temp_dir) / "new-course"),
+                request,
+            )
+
+            self.assertEqual(selected_path, Path(temp_dir).resolve() / "new-course.quizpool")
 
     def test_parse_multipart_uploads_reads_browser_file_fields(self) -> None:
         boundary = "----quizpool-test"

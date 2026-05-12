@@ -54,10 +54,12 @@ The same system tools listed above are still required for PDF export, grading, a
 Run from a local clone:
 
 ```bash
-uv run quiz_pool --project sample_quiz.quizpool
+uv run quiz_pool
 ```
 
-Then open `http://127.0.0.1:8000`.
+Then open `http://127.0.0.1:8000`. When `--project` is omitted, the Welcome page starts
+without creating a project database and lets you create or open a `.quizpool` file with the
+system file browser.
 
 Useful CLI flags:
 

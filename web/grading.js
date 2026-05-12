@@ -5,7 +5,6 @@ const state = {
   busyMessage: "",
   busyTitle: "",
   dbPath: "",
-  examStorePath: "",
   gradingFiles: [],
   annotateModalOpen: false,
   isAnnotating: false,
@@ -41,7 +40,6 @@ const elements = {
   exportGradingCsv: document.querySelector("#export-grading-csv"),
   exportObjectiveCsv: document.querySelector("#export-objective-csv"),
   errorPanel: document.querySelector("#grading-errors"),
-  examStorePath: document.querySelector("#exam-store-path"),
   gradingHeading: document.querySelector("#grading-heading"),
   gradingDuplicateCount: document.querySelector("#grading-duplicate-count"),
   gradingInputPath: document.querySelector("#grading-input-path"),
@@ -1112,9 +1110,7 @@ async function loadPaths() {
   }
   const payload = await response.json();
   state.dbPath = payload.dbPath;
-  state.examStorePath = payload.examStorePath;
   elements.dbPath.textContent = state.dbPath;
-  elements.examStorePath.textContent = state.examStorePath;
   setStatus("Ready to grade filled OMR PDFs.");
 }
 

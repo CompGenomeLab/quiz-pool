@@ -19,10 +19,10 @@
         </div>
         <nav class="page-links">
           <a class="page-link is-active" href="/">Welcome</a>
-          <a class="page-link" href="/index.html">Editor</a>
-          <a class="page-link" href="/generator.html">Exam Generator</a>
-          <a class="page-link" href="/viewer.html">Exam Viewer</a>
-          <a class="page-link" href="/grading.html">Grading</a>
+          <a class="page-link" data-project-link href="/index.html">Editor</a>
+          <a class="page-link" data-project-link href="/generator.html">Exam Generator</a>
+          <a class="page-link" data-project-link href="/viewer.html">Exam Viewer</a>
+          <a class="page-link" data-project-link href="/grading.html">Grading</a>
         </nav>
       </header>
 
@@ -32,7 +32,8 @@
             <p class="eyebrow">Session</p>
             <h2>Active Project</h2>
             <p class="helper-copy">
-              The project DB stores the quiz, generated exams, generator draft, and question images.
+              Create a project DB or open an existing one. It stores the quiz, generated exams,
+              generator draft, and question images.
             </p>
           </div>
 
@@ -49,6 +50,7 @@
           </div>
 
           <div class="sidebar__actions">
+            <button id="welcome-create-project" class="button button--ghost" type="button">Create Project</button>
             <button id="welcome-browse-project" class="button button--ghost" type="button">Browse Projects</button>
             <button id="welcome-apply-project" class="button button--primary" type="button">Open Project</button>
           </div>
@@ -66,25 +68,6 @@
           <section class="panel">
             <div class="panel__head">
               <div>
-                <p class="eyebrow">Defaults</p>
-                <h2>Suggested Starting Files</h2>
-              </div>
-            </div>
-            <div class="result-summary">
-              <div class="metric">
-                <span class="metric__label">Default Project DB</span>
-                <span id="welcome-default-project-path" class="metric__value"></span>
-              </div>
-              <div class="metric">
-                <span class="metric__label">Current Project DB</span>
-                <span id="welcome-current-project-path" class="metric__value"></span>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel__head">
-              <div>
                 <p class="eyebrow">Continue</p>
                 <h2>Open A Tool</h2>
               </div>
@@ -93,25 +76,25 @@
               These links use the currently active project. Open a different project first if needed.
             </p>
             <div class="tool-grid">
-              <a class="tool-card tool-card--editor" href="/index.html">
+              <a class="tool-card tool-card--editor" data-project-link href="/index.html">
                 <span class="tool-card__kicker">Authoring</span>
                 <strong class="tool-card__title">Editor</strong>
                 <span class="tool-card__text">Edit the quiz pool, manage question metadata.</span>
                 <span class="tool-card__action">Open Editor</span>
               </a>
-              <a class="tool-card tool-card--generator" href="/generator.html">
+              <a class="tool-card tool-card--generator" data-project-link href="/generator.html">
                 <span class="tool-card__kicker">Assembly</span>
                 <strong class="tool-card__title">Exam Generator</strong>
                 <span class="tool-card__text">Build saved exam sets, shuffle variants, and prepare printable student packets.</span>
                 <span class="tool-card__action">Generate Exams</span>
               </a>
-              <a class="tool-card tool-card--viewer" href="/viewer.html">
+              <a class="tool-card tool-card--viewer" data-project-link href="/viewer.html">
                 <span class="tool-card__kicker">Review</span>
                 <strong class="tool-card__title">Exam Viewer</strong>
                 <span class="tool-card__text">Inspect generated exam sets, browse student variants, and review QR-backed layouts.</span>
                 <span class="tool-card__action">View Saved Exams</span>
               </a>
-              <a class="tool-card tool-card--grading" href="/grading.html">
+              <a class="tool-card tool-card--grading" data-project-link href="/grading.html">
                 <span class="tool-card__kicker">Evaluation</span>
                 <strong class="tool-card__title">Grading</strong>
                 <span class="tool-card__text">Run OMR grading, inspect mismatches, export CSVs, and annotate scanned sheets.</span>

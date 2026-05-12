@@ -118,9 +118,9 @@ def default_exam_rules(omr_instructions: str = DEFAULT_OMR_INSTRUCTIONS) -> list
 
 @dataclass
 class AppState:
-    db_path: Path
-    exam_store_path: Path
-    project_path: Path
+    db_path: Path | None
+    exam_store_path: Path | None
+    project_path: Path | None
     validator: Draft202012Validator
     grading_upload_tempdir: Any | None = None
     grading_upload_path: Path | None = None
@@ -235,17 +235,6 @@ def grading_upload_label(file_names: list[str]) -> str:
     return f"Uploaded PDFs ({len(file_names)} files)"
 
 
-def default_project_path_for(db_path: Path) -> Path:
-    return db_path.with_suffix(DEFAULT_PROJECT_SUFFIX).resolve()
-
-
-def default_cli_project_path() -> Path:
-    source_default_db = ROOT / "sample_quiz.json"
-    if source_default_db.is_file():
-        return default_project_path_for(source_default_db)
-    return (Path.cwd() / f"sample_quiz{DEFAULT_PROJECT_SUFFIX}").resolve()
-
-
 def empty_quiz_document() -> dict[str, Any]:
     return {
         "title": "Untitled Quiz Pool",
@@ -253,14 +242,6 @@ def empty_quiz_document() -> dict[str, Any]:
         "learningObjectives": [],
         "questions": [],
     }
-
-
-def display_default_project_path() -> str:
-    default_path = default_cli_project_path()
-    try:
-        return str(default_path.relative_to(ROOT))
-    except ValueError:
-        return str(default_path)
 
 
 def load_json(path: Path) -> Any:
@@ -646,52 +627,183 @@ def latex_asset_name(asset_id: str, mime_type: str) -> str:
 
 
 SYSTEM_FILE_DIALOG_SCRIPT = r"""
+import asyncio
 import json
+import os
 import sys
+from urllib.parse import unquote, urlparse
+from uuid import uuid4
 
-try:
-    import tkinter as tk
-    from tkinter import filedialog
-except Exception as error:
-    print(json.dumps({"ok": False, "error": f"Could not load the system file dialog: {error}"}))
-    sys.exit(0)
+
+def portal_file_path(uri):
+    parsed = urlparse(str(uri))
+    if parsed.scheme != "file":
+        raise RuntimeError(f"The system file dialog returned a non-file URI: {uri}")
+    if parsed.netloc and parsed.netloc != "localhost":
+        raise RuntimeError(f"The system file dialog returned an unsupported file host: {parsed.netloc}")
+    return unquote(parsed.path)
+
+
+async def choose_linux_portal_path(config):
+    try:
+        from dbus_next import Variant
+        from dbus_next.aio import MessageBus
+        from dbus_next.introspection import Node
+    except Exception as error:
+        raise RuntimeError(f"Could not load the Linux desktop file dialog client: {error}") from error
+
+    bus = await MessageBus().connect()
+    try:
+        portal_name = "org.freedesktop.portal.Desktop"
+        portal_path = "/org/freedesktop/portal/desktop"
+        portal = bus.get_proxy_object(
+            portal_name,
+            portal_path,
+            Node.parse(
+                '''
+                <node>
+                  <interface name="org.freedesktop.portal.FileChooser">
+                    <method name="OpenFile">
+                      <arg type="s" direction="in" />
+                      <arg type="s" direction="in" />
+                      <arg type="a{sv}" direction="in" />
+                      <arg type="o" direction="out" />
+                    </method>
+                    <method name="SaveFile">
+                      <arg type="s" direction="in" />
+                      <arg type="s" direction="in" />
+                      <arg type="a{sv}" direction="in" />
+                      <arg type="o" direction="out" />
+                    </method>
+                  </interface>
+                </node>
+                '''
+            ),
+        )
+        chooser = portal.get_interface("org.freedesktop.portal.FileChooser")
+
+        options = {
+            "handle_token": Variant("s", f"quiz_pool_{uuid4().hex}"),
+            "multiple": Variant("b", False),
+        }
+        initial_dir = str(config.get("initialDir") or "").strip()
+        if initial_dir:
+            options["current_folder"] = Variant("ay", os.fsencode(initial_dir) + b"\0")
+
+        filters = []
+        for item in config.get("filetypes") or []:
+            if not isinstance(item, list) or len(item) != 2:
+                continue
+            filters.append([str(item[0]), [[0, str(item[1])]]])
+        if filters:
+            options["filters"] = Variant("a(sa(us))", filters)
+
+        mode = config.get("mode")
+        if mode == "directory":
+            options["directory"] = Variant("b", True)
+
+        title = config.get("title") or "Choose File"
+        if mode == "save-file":
+            handle = await chooser.call_save_file("", title, options)
+        else:
+            handle = await chooser.call_open_file("", title, options)
+
+        request_object = bus.get_proxy_object(
+            portal_name,
+            handle,
+            Node.parse(
+                '''
+                <node>
+                  <interface name="org.freedesktop.portal.Request">
+                    <signal name="Response">
+                      <arg type="u" />
+                      <arg type="a{sv}" />
+                    </signal>
+                  </interface>
+                </node>
+                '''
+            ),
+        )
+        request = request_object.get_interface("org.freedesktop.portal.Request")
+        loop = asyncio.get_running_loop()
+        response_future = loop.create_future()
+
+        def handle_response(response, results):
+            if not response_future.done():
+                response_future.set_result((int(response), results))
+
+        request.on_response(handle_response)
+        response, results = await response_future
+        if response != 0:
+            return ""
+
+        uris = results.get("uris")
+        uri_values = uris.value if uris is not None else []
+        if not uri_values:
+            return ""
+        return portal_file_path(uri_values[0])
+    finally:
+        bus.disconnect()
+
+
+def choose_tk_path(config):
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as error:
+        raise RuntimeError(f"Could not load the system file dialog: {error}") from error
+
+    try:
+        root = tk.Tk()
+    except Exception as error:
+        raise RuntimeError(f"Could not open the system file dialog: {error}") from error
+
+    root.withdraw()
+    try:
+        try:
+            root.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        root.update()
+        options = {
+            "title": config.get("title") or "Choose File",
+            "initialdir": config.get("initialDir") or None,
+        }
+        if config.get("mode") == "directory":
+            return filedialog.askdirectory(mustexist=True, **options) or ""
+        if config.get("mode") == "save-file":
+            return filedialog.asksaveasfilename(
+                defaultextension=config.get("defaultExtension") or "",
+                filetypes=config.get("filetypes") or [("All files", "*")],
+                **options,
+            ) or ""
+        return filedialog.askopenfilename(
+            filetypes=config.get("filetypes") or [("All files", "*")],
+            **options,
+        ) or ""
+    finally:
+        root.destroy()
+
 
 config = json.load(sys.stdin)
 try:
-    root = tk.Tk()
-except Exception as error:
-    print(json.dumps({"ok": False, "error": f"Could not open the system file dialog: {error}"}))
-    sys.exit(0)
-
-root.withdraw()
-try:
-    try:
-        root.attributes("-topmost", True)
-    except tk.TclError:
-        pass
-    root.update()
-    options = {
-        "title": config.get("title") or "Choose File",
-        "initialdir": config.get("initialDir") or None,
-    }
-    if config.get("mode") == "directory":
-        selected_path = filedialog.askdirectory(mustexist=True, **options)
+    if sys.platform.startswith("linux"):
+        selected_path = asyncio.run(choose_linux_portal_path(config))
     else:
-        selected_path = filedialog.askopenfilename(
-            filetypes=config.get("filetypes") or [("All files", "*")],
-            **options,
-        )
-    print(json.dumps({"ok": True, "path": selected_path or ""}))
-finally:
-    root.destroy()
+        selected_path = choose_tk_path(config)
+except Exception as error:
+    print(json.dumps({"ok": False, "error": str(error)}))
+    sys.exit(0)
+print(json.dumps({"ok": True, "path": selected_path or ""}))
 """
 
 SYSTEM_FILE_DIALOG_PURPOSES: dict[str, dict[str, Any]] = {
     "project": {
         "title": "Open Project DB",
-        "modes": {"file"},
+        "modes": {"file", "save-file"},
         "suffixes": {DEFAULT_PROJECT_SUFFIX},
         "filetypes": [("Quiz Pool projects", f"*{DEFAULT_PROJECT_SUFFIX}"), ("All files", "*")],
+        "default_extension": DEFAULT_PROJECT_SUFFIX,
         "description": "a Quiz Pool project DB",
     },
     "quiz-json": {
@@ -741,6 +853,12 @@ def system_file_dialog_allowed(path: Path, purpose: str, mode: str) -> bool:
         return False
     if mode == "directory":
         return path.is_dir()
+    if mode == "save-file":
+        return (
+            not path.is_dir()
+            and path.parent.is_dir()
+            and path.suffix.lower() in purpose_config["suffixes"]
+        )
     return path.is_file() and path.suffix.lower() in purpose_config["suffixes"]
 
 
@@ -763,8 +881,8 @@ def normalize_system_file_dialog_request(
     purpose_config = SYSTEM_FILE_DIALOG_PURPOSES.get(purpose)
     if purpose_config is None:
         return None, [{"path": "purpose", "message": "Unsupported file dialog purpose"}]
-    if mode not in {"file", "directory"}:
-        return None, [{"path": "mode", "message": "File dialog mode must be file or directory"}]
+    if mode not in {"file", "directory", "save-file"}:
+        return None, [{"path": "mode", "message": "File dialog mode must be file, save-file, or directory"}]
     if mode not in purpose_config["modes"]:
         return None, [{"path": "mode", "message": f"{purpose} selection does not support {mode} mode"}]
 
@@ -775,9 +893,30 @@ def normalize_system_file_dialog_request(
             "title": title or purpose_config["title"],
             "initialDir": str(resolve_system_dialog_initial_dir(start_path, fallback_path)),
             "filetypes": purpose_config["filetypes"],
+            "defaultExtension": purpose_config.get("default_extension", ""),
         },
         [],
     )
+
+
+def normalize_system_file_dialog_selected_path(
+    raw_path: str,
+    request: dict[str, Any],
+) -> Path | None:
+    selected_text = raw_path.strip()
+    if not selected_text:
+        return None
+
+    selected_path = Path(selected_text).expanduser().resolve()
+    mode = str(request["mode"])
+    default_extension = str(request.get("defaultExtension") or "").strip()
+    if mode == "save-file" and default_extension and not selected_path.suffix:
+        selected_path = selected_path.with_suffix(default_extension).resolve()
+
+    if not system_file_dialog_allowed(selected_path, str(request["purpose"]), mode):
+        description = SYSTEM_FILE_DIALOG_PURPOSES[str(request["purpose"])]["description"]
+        raise ValueError(f"Selected path must be {description}: {selected_path}")
+    return selected_path
 
 
 def choose_system_file_dialog_path(request: dict[str, Any]) -> Path | None:
@@ -805,19 +944,17 @@ def choose_system_file_dialog_path(request: dict[str, Any]) -> Path | None:
     if not payload.get("ok"):
         raise RuntimeError(str(payload.get("error") or "Could not open the system file dialog."))
 
-    raw_path = str(payload.get("path") or "").strip()
-    if not raw_path:
-        return None
-
-    selected_path = Path(raw_path).expanduser().resolve()
-    if not system_file_dialog_allowed(selected_path, str(request["purpose"]), str(request["mode"])):
-        description = SYSTEM_FILE_DIALOG_PURPOSES[str(request["purpose"])]["description"]
-        raise ValueError(f"Selected path must be {description}: {selected_path}")
-    return selected_path
+    return normalize_system_file_dialog_selected_path(str(payload.get("path") or ""), request)
 
 
 def initialize_empty_project(project_path: Path) -> None:
     ensure_project_has_quiz(project_path)
+
+
+def active_project_path(state: AppState) -> Path:
+    if state.project_path is None:
+        raise ValueError("No active project DB. Create or open one from the Welcome page.")
+    return state.project_path
 
 
 def import_quiz_json_into_project(
@@ -872,19 +1009,19 @@ def validate_quiz_file(path: Path, validator: Draft202012Validator) -> None:
 
 
 def load_active_quiz(state: AppState) -> dict[str, Any]:
-    return load_project_quiz(state.project_path)
+    return load_project_quiz(active_project_path(state))
 
 
 def write_active_quiz(state: AppState, payload: dict[str, Any]) -> None:
-    write_project_quiz(state.project_path, payload)
+    write_project_quiz(active_project_path(state), payload)
 
 
 def load_active_exam_store(state: AppState) -> dict[str, Any]:
-    return load_project_exam_store(state.project_path)
+    return load_project_exam_store(active_project_path(state))
 
 
 def append_active_exam_set(state: AppState, exam_set: dict[str, Any]) -> None:
-    upsert_project_exam_set(state.project_path, exam_set)
+    upsert_project_exam_set(active_project_path(state), exam_set)
 
 
 def update_active_exam_set_print_settings(
@@ -893,18 +1030,18 @@ def update_active_exam_set_print_settings(
     print_settings: dict[str, Any],
 ) -> dict[str, Any] | None:
     return update_project_exam_set_print_settings(
-        state.project_path,
+        active_project_path(state),
         exam_set_id,
         print_settings,
     )
 
 
 def delete_active_exam_set(state: AppState, exam_set_id: str) -> bool:
-    return delete_project_exam_set(state.project_path, exam_set_id)
+    return delete_project_exam_set(active_project_path(state), exam_set_id)
 
 
 def find_active_exam_set(state: AppState, exam_set_id: str) -> dict[str, Any] | None:
-    return find_project_exam_set(state.project_path, exam_set_id)
+    return find_project_exam_set(active_project_path(state), exam_set_id)
 
 
 def find_active_variant(
@@ -1439,9 +1576,10 @@ def build_question_image_assets(
 ) -> dict[str, bytes]:
     if state is None:
         return {}
+    project_path = active_project_path(state)
     assets: dict[str, bytes] = {}
     for asset_id in collect_question_image_asset_ids(questions):
-        asset = get_project_asset(state.project_path, asset_id)
+        asset = get_project_asset(project_path, asset_id)
         if asset is None:
             continue
         assets[latex_asset_name(asset_id, str(asset["mimeType"]))] = asset["data"]
@@ -2550,6 +2688,7 @@ def grade_exam_pdfs(
     input_path: Path,
     grading_formula: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    project_path = active_project_path(state)
     if not input_path.exists():
         raise ValueError(f"Input path not found: {input_path}")
     if input_path.is_file() and input_path.suffix.lower() != ".pdf":
@@ -2599,8 +2738,8 @@ def grade_exam_pdfs(
         "gradedAt": utc_timestamp(),
         "inputPath": str(input_path),
         "sourceBasePath": str(input_path if input_path.is_dir() else input_path.parent),
-        "examStorePath": str(state.project_path),
-        "projectPath": str(state.project_path),
+        "examStorePath": str(project_path),
+        "projectPath": str(project_path),
         "gradingFormula": normalized_formula,
         "rows": rows,
         "summary": {
@@ -2777,19 +2916,19 @@ def update_project_grading_run_formula(
 
 
 def append_active_grading_run(state: AppState, grading_result: dict[str, Any]) -> dict[str, Any]:
-    return upsert_project_grading_run(state.project_path, grading_result)
+    return upsert_project_grading_run(active_project_path(state), grading_result)
 
 
 def list_active_grading_runs(state: AppState) -> list[dict[str, Any]]:
-    return load_project_grading_runs(state.project_path)
+    return load_project_grading_runs(active_project_path(state))
 
 
 def find_active_grading_run(state: AppState, grading_run_id: str) -> dict[str, Any] | None:
-    return find_project_grading_run(state.project_path, grading_run_id)
+    return find_project_grading_run(active_project_path(state), grading_run_id)
 
 
 def delete_active_grading_run(state: AppState, grading_run_id: str) -> bool:
-    return delete_project_grading_run(state.project_path, grading_run_id)
+    return delete_project_grading_run(active_project_path(state), grading_run_id)
 
 
 def update_active_grading_run_formula(
@@ -2798,7 +2937,7 @@ def update_active_grading_run_formula(
     grading_formula: dict[str, Any],
 ) -> dict[str, Any] | None:
     return update_project_grading_run_formula(
-        state.project_path,
+        active_project_path(state),
         grading_run_id,
         grading_formula,
     )
@@ -3395,6 +3534,7 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
     ]
     annotate_variant_printables(variants)
     annotate_variant_print_layouts(variants)
+    project_path = active_project_path(state)
 
     return {
         "examSetId": exam_set_id,
@@ -3403,8 +3543,8 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
         "quiz": {
             "title": quiz.get("title", ""),
             "description": quiz.get("description", ""),
-            "dbPath": str(state.project_path),
-            "projectPath": str(state.project_path),
+            "dbPath": str(project_path),
+            "projectPath": str(project_path),
         },
         "printSettings": {
             "institutionName": request["institutionName"],
@@ -4780,6 +4920,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/session-paths":
                 self.handle_get_session_paths()
                 return
+            if parsed.path.startswith("/api/") and self.reject_without_active_project():
+                return
             if parsed.path == "/api/generator-draft":
                 self.handle_get_generator_draft()
                 return
@@ -4817,6 +4959,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_PUT(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/") and self.reject_without_active_project():
+                return
             if parsed.path == "/api/quiz":
                 self.handle_put_quiz()
                 return
@@ -4841,6 +4985,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/api/session-paths":
                 self.handle_update_session_paths()
+                return
+            if parsed.path.startswith("/api/") and self.reject_without_active_project():
                 return
             if parsed.path == "/api/assets":
                 self.handle_post_asset()
@@ -4870,6 +5016,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def do_DELETE(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/") and self.reject_without_active_project():
+                return
             if parsed.path == "/api/generator-draft":
                 self.handle_delete_generator_draft()
                 return
@@ -4921,13 +5069,31 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return None, [{"path": "gradingFormula", "message": f"Invalid grading formula JSON: {error.msg}"}]
             return normalize_grading_formula_payload(payload)
 
+        def reject_without_active_project(self) -> bool:
+            if state.project_path is not None:
+                return False
+            self.send_json(
+                {
+                    "ok": False,
+                    "errors": [
+                        {
+                            "path": "<project>",
+                            "message": "No active project DB. Create or open one from the Welcome page.",
+                        }
+                    ],
+                },
+                status=HTTPStatus.CONFLICT,
+            )
+            return True
+
         def session_payload(self, *, ok: bool = True) -> dict[str, Any]:
+            project_path = str(state.project_path) if state.project_path is not None else ""
             return {
                 "ok": ok,
-                "projectPath": str(state.project_path),
-                "dbPath": str(state.project_path),
-                "examStorePath": str(state.project_path),
-                "defaultProjectPath": display_default_project_path(),
+                "hasActiveProject": state.project_path is not None,
+                "projectPath": project_path,
+                "dbPath": project_path,
+                "examStorePath": project_path,
             }
 
         def handle_get_capabilities(self) -> None:
@@ -5057,36 +5223,40 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             self.send_json(self.session_payload())
 
         def handle_get_generator_draft(self) -> None:
-            draft = load_project_generator_draft(state.project_path)
-            self.send_json({"draft": draft, "projectPath": str(state.project_path)})
+            project_path = active_project_path(state)
+            draft = load_project_generator_draft(project_path)
+            self.send_json({"draft": draft, "projectPath": str(project_path)})
 
         def handle_put_generator_draft(self) -> None:
             payload, errors = self.read_json_body()
             if errors:
                 self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
                 return
-            write_project_generator_draft(state.project_path, payload)
-            self.send_json({"ok": True, "projectPath": str(state.project_path)})
+            project_path = active_project_path(state)
+            write_project_generator_draft(project_path, payload)
+            self.send_json({"ok": True, "projectPath": str(project_path)})
 
         def handle_delete_generator_draft(self) -> None:
-            delete_project_generator_draft(state.project_path)
-            self.send_json({"ok": True, "projectPath": str(state.project_path)})
+            project_path = active_project_path(state)
+            delete_project_generator_draft(project_path)
+            self.send_json({"ok": True, "projectPath": str(project_path)})
 
         def handle_import_quiz_json(self) -> None:
             payload, errors = self.read_json_body()
             if errors:
                 self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
                 return
+            project_path = active_project_path(state)
 
             raw_content = payload.get("content")
             if isinstance(raw_content, str):
                 try:
                     quiz = import_quiz_json_content_into_project(
-                        project_path=state.project_path,
+                        project_path=project_path,
                         content=raw_content,
                         validator=state.validator,
                     )
-                    delete_project_generator_draft(state.project_path)
+                    delete_project_generator_draft(project_path)
                 except (ValueError, json.JSONDecodeError) as error:
                     self.send_json(
                         {"ok": False, "errors": [{"path": "<import>", "message": str(error)}]},
@@ -5108,11 +5278,11 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             quiz_path = Path(raw_path).expanduser().resolve()
             try:
                 quiz = import_quiz_json_into_project(
-                    project_path=state.project_path,
+                    project_path=project_path,
                     quiz_path=quiz_path,
                     validator=state.validator,
                 )
-                delete_project_generator_draft(state.project_path)
+                delete_project_generator_draft(project_path)
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 self.send_json(
                     {"ok": False, "errors": [{"path": "<import>", "message": str(error)}]},
@@ -5143,9 +5313,10 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
 
             try:
+                project_path = active_project_path(state)
                 image_bytes = base64.b64decode(data_base64, validate=True)
                 asset = store_project_asset(
-                    state.project_path,
+                    project_path,
                     filename=filename,
                     mime_type=mime_type,
                     data=image_bytes,
@@ -5163,7 +5334,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if not asset_id:
                 self.send_error(HTTPStatus.NOT_FOUND, "Asset not found")
                 return
-            asset = get_project_asset(state.project_path, asset_id)
+            asset = get_project_asset(active_project_path(state), asset_id)
             if asset is None:
                 self.send_error(HTTPStatus.NOT_FOUND, "Asset not found")
                 return
@@ -5174,6 +5345,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             )
 
         def handle_list_exam_sets(self) -> None:
+            project_path = active_project_path(state)
             try:
                 summaries = [build_exam_set_summary(item) for item in list_active_exam_sets(state)]
             except ValueError as error:
@@ -5185,13 +5357,14 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             self.send_json(
                 {
-                    "examStorePath": str(state.project_path),
-                    "projectPath": str(state.project_path),
+                    "examStorePath": str(project_path),
+                    "projectPath": str(project_path),
                     "examSets": summaries,
                 }
             )
 
         def handle_list_grading_runs(self) -> None:
+            project_path = active_project_path(state)
             try:
                 summaries = list_active_grading_runs(state)
             except ValueError as error:
@@ -5203,12 +5376,13 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             self.send_json(
                 {
-                    "projectPath": str(state.project_path),
+                    "projectPath": str(project_path),
                     "gradingRuns": summaries,
                 }
             )
 
         def handle_get_grading_run(self, path: str) -> None:
+            project_path = active_project_path(state)
             grading_run_id = unquote(path.removeprefix("/api/gradings/run/")).strip()
             if not grading_run_id:
                 self.send_error(HTTPStatus.NOT_FOUND, "Grading run not found")
@@ -5229,7 +5403,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             self.send_json(
                 {
-                    "projectPath": str(state.project_path),
+                    "projectPath": str(project_path),
                     "summary": build_grading_run_summary(grading_run),
                     "gradingRun": grading_run,
                 }
@@ -5328,6 +5502,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             )
 
         def handle_get_exam_set(self, path: str) -> None:
+            project_path = active_project_path(state)
             exam_set_id = unquote(path.removeprefix("/api/exams/set/")).strip()
             if not exam_set_id:
                 self.send_error(HTTPStatus.NOT_FOUND, "Exam set not found")
@@ -5355,8 +5530,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
             self.send_json(
                 {
-                    "examStorePath": str(state.project_path),
-                    "projectPath": str(state.project_path),
+                    "examStorePath": str(project_path),
+                    "projectPath": str(project_path),
                     "summary": build_exam_set_summary(exam_set),
                     "examSet": {
                         "examSetId": exam_set["examSetId"],
@@ -5446,6 +5621,7 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             )
 
         def handle_get_variant(self, path: str) -> None:
+            project_path = active_project_path(state)
             variant_id = unquote(path.removeprefix("/api/exams/variant/")).strip()
             if not variant_id:
                 self.send_error(HTTPStatus.NOT_FOUND, "Variant not found")
@@ -5469,8 +5645,8 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             annotate_variant_print_layouts([variant])
             self.send_json(
                 {
-                    "examStorePath": str(state.project_path),
-                    "projectPath": str(state.project_path),
+                    "examStorePath": str(project_path),
+                    "projectPath": str(project_path),
                     "examSetId": exam_set["examSetId"],
                     "generatedAt": exam_set["generatedAt"],
                     "generationSeed": str(
@@ -5610,8 +5786,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
-            exam_run["examStorePath"] = str(state.project_path)
-            exam_run["projectPath"] = str(state.project_path)
+            project_path = active_project_path(state)
+            exam_run["examStorePath"] = str(project_path)
+            exam_run["projectPath"] = str(project_path)
             self.send_json(exam_run)
 
         def handle_grade_exams(self) -> None:
@@ -5747,6 +5924,23 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def serve_static(self, raw_path: str) -> None:
             request_path = raw_path or "/"
+            protected_page_paths = {
+                "/editor",
+                "/generator",
+                "/viewer",
+                "/grading",
+                "/index.html",
+                "/generator.html",
+                "/viewer.html",
+                "/grading.html",
+            }
+            if state.project_path is None and request_path in protected_page_paths:
+                self.send_response(HTTPStatus.SEE_OTHER)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
             if request_path == "/":
                 relative = "welcome.html"
             elif request_path == "/welcome":
@@ -5846,7 +6040,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project",
         type=Path,
-        default=default_cli_project_path(),
+        default=None,
         help="Path to the unified Quiz Pool project database (.quizpool)",
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
@@ -5856,7 +6050,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    project_path = args.project.resolve()
+    project_path = args.project.expanduser().resolve() if args.project is not None else None
 
     if not INTERNAL_SCHEMA_PATH.is_file():
         raise SystemExit(f"Internal schema file not found: {INTERNAL_SCHEMA_PATH}")
@@ -5864,10 +6058,11 @@ def main() -> None:
         raise SystemExit(f"Web assets not found: {WEB_ROOT}")
 
     validator = Draft202012Validator(load_internal_schema())
-    try:
-        initialize_empty_project(project_path)
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
+    if project_path is not None:
+        try:
+            initialize_empty_project(project_path)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
 
     app_state = AppState(
         db_path=project_path,
@@ -5879,7 +6074,10 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), handler)
 
     print(f"Quiz editor running at http://{args.host}:{args.port}")
-    print(f"Project DB: {project_path}")
+    if project_path is None:
+        print("Project DB: create or open one from the Welcome page")
+    else:
+        print(f"Project DB: {project_path}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -2,7 +2,7 @@ import { openSystemFileDialog } from "./system-file-dialog.js";
 
 const state = {
   currentProjectPath: "",
-  defaultProjectPath: "",
+  hasActiveProject: false,
   selectedProjectPath: "",
   statusIsError: false,
   statusMessage: "Loading current project...",
@@ -12,10 +12,10 @@ const state = {
 const elements = {
   applyProject: document.querySelector("#welcome-apply-project"),
   browseProject: document.querySelector("#welcome-browse-project"),
-  currentProjectPath: document.querySelector("#welcome-current-project-path"),
-  defaultProjectPath: document.querySelector("#welcome-default-project-path"),
+  createProject: document.querySelector("#welcome-create-project"),
   errorList: document.querySelector("#welcome-error-list"),
   errorPanel: document.querySelector("#welcome-errors"),
+  projectLinks: [...document.querySelectorAll("[data-project-link]")],
   selectedProjectPath: document.querySelector("#welcome-selected-project-path"),
   status: document.querySelector("#welcome-status"),
 };
@@ -45,9 +45,21 @@ function renderErrors() {
 }
 
 function render() {
-  elements.currentProjectPath.textContent = state.currentProjectPath;
-  elements.defaultProjectPath.textContent = state.defaultProjectPath;
   elements.selectedProjectPath.value = state.selectedProjectPath || state.currentProjectPath;
+  for (const link of elements.projectLinks) {
+    if (!link.dataset.projectHref) {
+      link.dataset.projectHref = link.getAttribute("href") ?? "";
+    }
+    link.classList.toggle("is-disabled", !state.hasActiveProject);
+    link.setAttribute("aria-disabled", String(!state.hasActiveProject));
+    if (state.hasActiveProject) {
+      link.setAttribute("href", link.dataset.projectHref);
+      link.removeAttribute("tabindex");
+    } else {
+      link.removeAttribute("href");
+      link.setAttribute("tabindex", "-1");
+    }
+  }
   renderErrors();
 }
 
@@ -59,19 +71,25 @@ async function loadProject() {
     throw new Error(payload.errors?.[0]?.message ?? `Could not load project (${response.status})`);
   }
 
-  state.currentProjectPath = payload.projectPath;
-  state.selectedProjectPath = payload.projectPath;
-  state.defaultProjectPath = payload.defaultProjectPath ?? "";
+  state.hasActiveProject = Boolean(payload.hasActiveProject);
+  state.currentProjectPath = payload.projectPath ?? "";
+  state.selectedProjectPath = payload.projectPath ?? "";
   state.validationErrors = [];
   render();
-  setStatus("Ready.");
+  setStatus(
+    state.hasActiveProject
+      ? "Ready."
+      : "No active project. Create a project DB or open an existing one.",
+  );
 }
 
-async function openProject() {
-  const projectPath = elements.selectedProjectPath.value.trim() || state.selectedProjectPath || state.currentProjectPath;
+async function activateProject(projectPath, {
+  pendingStatus = "Opening selected project...",
+  successStatus = "Active project updated.",
+} = {}) {
   state.validationErrors = [];
   renderErrors();
-  setStatus("Opening selected project...");
+  setStatus(pendingStatus);
 
   const response = await fetch("/api/project/open", {
     method: "POST",
@@ -88,14 +106,45 @@ async function openProject() {
     return;
   }
 
+  state.hasActiveProject = Boolean(payload.hasActiveProject ?? true);
   state.currentProjectPath = payload.projectPath;
   state.selectedProjectPath = payload.projectPath;
-  state.defaultProjectPath = payload.defaultProjectPath ?? state.defaultProjectPath;
   render();
-  setStatus("Active project updated.");
+  setStatus(successStatus);
+}
+
+async function openProject() {
+  const projectPath = elements.selectedProjectPath.value.trim() || state.selectedProjectPath || state.currentProjectPath;
+  await activateProject(projectPath);
 }
 
 function wireEvents() {
+  elements.createProject.addEventListener("click", async () => {
+    try {
+      setStatus("Choose where to create the project DB...");
+      const selectedPath = await openSystemFileDialog({
+        title: "Create Project DB",
+        purpose: "project",
+        mode: "save-file",
+        startPath: state.selectedProjectPath || state.currentProjectPath,
+      });
+      if (!selectedPath) {
+        setStatus("Project creation canceled.");
+        return;
+      }
+      state.selectedProjectPath = selectedPath;
+      elements.selectedProjectPath.value = selectedPath;
+      await activateProject(selectedPath, {
+        pendingStatus: "Creating project DB...",
+        successStatus: "Project DB created and activated.",
+      });
+    } catch (error) {
+      state.validationErrors = [{ path: "<project>", message: error.message }];
+      renderErrors();
+      setStatus(error.message, true);
+    }
+  });
+
   elements.browseProject.addEventListener("click", async () => {
     try {
       setStatus("Opening system file picker...");
