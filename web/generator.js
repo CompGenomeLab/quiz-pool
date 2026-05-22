@@ -16,6 +16,7 @@ const state = {
     variantCount: 1,
     generationSeed: "",
     sources: [],
+    sourceWeights: {},
     difficulties: [],
     learningObjectiveIds: [],
     overrides: {},
@@ -25,6 +26,8 @@ const state = {
   derivedExcludeQuestionIds: new Set(),
   questionHashes: {},
   poolSearch: "",
+  // Status tones the Pool Breakdown is filtered to (empty = show all).
+  breakdownStatusFilter: new Set(),
 };
 
 const MAX_QUESTIONS_PER_EXAM = 100;
@@ -72,6 +75,8 @@ const elements = {
   generationSeed: document.querySelector("#generation-seed"),
   includedCount: document.querySelector("#included-count"),
   objectiveFilters: document.querySelector("#objective-filters"),
+  poolBreakdownBody: document.querySelector("#pool-breakdown-body"),
+  poolBreakdownTotal: document.querySelector("#pool-breakdown-total"),
   poolSearch: document.querySelector("#pool-search"),
   poolSearchSummary: document.querySelector("#pool-search-summary"),
   poolTableBody: document.querySelector("#pool-table-body"),
@@ -90,11 +95,13 @@ const elements = {
   resultSelectedCount: document.querySelector("#result-selected-count"),
   resultVariantCount: document.querySelector("#result-variant-count"),
   resultViewerLink: document.querySelector("#result-viewer-link"),
+  resultClose: document.querySelector("#result-close"),
   results: document.querySelector("#generation-results"),
   selectVisibleSources: document.querySelector("#select-visible-sources"),
   sourceFilterCount: document.querySelector("#source-filter-count"),
   sourceFilterSearch: document.querySelector("#source-filter-search"),
   sourceFilterSummary: document.querySelector("#source-filter-summary"),
+  sourceWeightsPanel: document.querySelector("#source-weights"),
   sourceFilters: document.querySelector("#source-filters"),
   closePoolQuestion: document.querySelector("#close-pool-question"),
   sortStatus: document.querySelector("#sort-status"),
@@ -488,10 +495,60 @@ function createFilterChip(labelText, checked, onChange) {
   return label;
 }
 
+const MAX_SOURCE_WEIGHT = 99;
+
 function setSourceSelected(source, selected) {
   state.selection.sources = selected
     ? dedupe([...state.selection.sources, source])
     : state.selection.sources.filter((item) => item !== source);
+  if (!selected) {
+    delete state.selection.sourceWeights[source];
+  }
+}
+
+// Default weight is 1; only non-default weights are stored so an empty map
+// means "sample every selected source equally".
+function sourceWeight(source) {
+  const weight = state.selection.sourceWeights[source];
+  return Number.isFinite(weight) && weight > 0 ? weight : 1;
+}
+
+function setSourceWeight(source, rawWeight) {
+  const parsed = Math.round(Number(rawWeight));
+  const clamped = Math.min(MAX_SOURCE_WEIGHT, Math.max(1, Number.isFinite(parsed) ? parsed : 1));
+  if (clamped === 1) {
+    delete state.selection.sourceWeights[source];
+  } else {
+    state.selection.sourceWeights[source] = clamped;
+  }
+  return clamped;
+}
+
+// Rebuild the weight map from saved data, keeping only valid selected sources
+// and clamping each value the same way the UI does.
+function restoreSourceWeights(rawWeights) {
+  state.selection.sourceWeights = {};
+  if (!rawWeights || typeof rawWeights !== "object") {
+    return;
+  }
+  const selected = new Set(state.selection.sources);
+  for (const [source, weight] of Object.entries(rawWeights)) {
+    if (selected.has(source)) {
+      setSourceWeight(source, weight);
+    }
+  }
+}
+
+// Only non-default weights for currently selected sources are persisted/sent.
+function selectedSourceWeights() {
+  const selected = new Set(state.selection.sources);
+  const weights = {};
+  for (const [source, weight] of Object.entries(state.selection.sourceWeights)) {
+    if (selected.has(source) && Number.isFinite(weight) && weight > 1) {
+      weights[source] = weight;
+    }
+  }
+  return weights;
 }
 
 function createSourceOption(option) {
@@ -536,25 +593,115 @@ function createSourceOption(option) {
 }
 
 function createSelectedSourceToken(source) {
-  const button = document.createElement("button");
-  button.className = "source-filter-token";
-  button.type = "button";
-  button.setAttribute("aria-label", `Remove ${source} source filter`);
+  const token = document.createElement("span");
+  token.className = "source-filter-token";
 
   const text = document.createElement("span");
   text.textContent = source;
 
-  const remove = document.createElement("span");
+  const remove = document.createElement("button");
   remove.className = "source-filter-token__remove";
+  remove.type = "button";
   remove.textContent = "x";
-
-  button.append(text, remove);
-  button.addEventListener("click", () => {
+  remove.setAttribute("aria-label", `Remove ${source} source filter`);
+  remove.addEventListener("click", () => {
     setSourceSelected(source, false);
     renderPoolState();
     scheduleDraftSave();
   });
-  return button;
+
+  token.append(text, remove);
+  return token;
+}
+
+// Weighting only matters with 2+ selected sources, so the panel stays hidden
+// until then. Bars show each weight relative to the heaviest selected source
+// (relative emphasis — not an exact draw probability).
+function renderSourceWeights(selectedSources) {
+  const panel = elements.sourceWeightsPanel;
+  if (selectedSources.length < 2) {
+    panel.classList.add("hidden");
+    panel.replaceChildren();
+    return;
+  }
+
+  const maxWeight = Math.max(...selectedSources.map((source) => sourceWeight(source)));
+  const fragment = document.createDocumentFragment();
+
+  const head = document.createElement("div");
+  head.className = "source-weights__head";
+  const heading = document.createElement("h4");
+  heading.textContent = "Source Weights";
+  const hint = document.createElement("p");
+  hint.textContent = "Heavier sources contribute proportionally more questions.";
+  head.append(heading, hint);
+  fragment.append(head);
+
+  for (const source of selectedSources) {
+    fragment.append(createSourceWeightRow(source, maxWeight, selectedSources));
+  }
+
+  panel.replaceChildren(fragment);
+  panel.classList.remove("hidden");
+}
+
+function createSourceWeightRow(source, maxWeight, selectedSources) {
+  const value = sourceWeight(source);
+
+  const row = document.createElement("div");
+  row.className = "source-weight";
+
+  const name = document.createElement("span");
+  name.className = "source-weight__name";
+  name.textContent = source;
+  name.title = source;
+
+  const stepper = document.createElement("div");
+  stepper.className = "source-weight__stepper";
+
+  const decrement = document.createElement("button");
+  decrement.type = "button";
+  decrement.className = "source-weight__step";
+  decrement.textContent = "−";
+  decrement.setAttribute("aria-label", `Decrease weight for ${source}`);
+  decrement.disabled = value <= 1;
+
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "source-weight__value";
+  input.min = "1";
+  input.max = String(MAX_SOURCE_WEIGHT);
+  input.step = "1";
+  input.value = String(value);
+  input.setAttribute("aria-label", `Weight for ${source}`);
+
+  const increment = document.createElement("button");
+  increment.type = "button";
+  increment.className = "source-weight__step";
+  increment.textContent = "+";
+  increment.setAttribute("aria-label", `Increase weight for ${source}`);
+  increment.disabled = value >= MAX_SOURCE_WEIGHT;
+
+  const commit = (nextWeight) => {
+    setSourceWeight(source, nextWeight);
+    renderSourceWeights(selectedSources);
+    scheduleDraftSave();
+  };
+  decrement.addEventListener("click", () => commit(value - 1));
+  increment.addEventListener("click", () => commit(value + 1));
+  input.addEventListener("change", (event) => commit(event.target.value));
+
+  stepper.append(decrement, input, increment);
+
+  const bar = document.createElement("div");
+  bar.className = "source-weight__bar";
+  const fill = document.createElement("div");
+  fill.className = "source-weight__bar-fill";
+  fill.style.width = `${maxWeight > 0 ? (value / maxWeight) * 100 : 0}%`;
+  bar.append(fill);
+
+  row.append(name, stepper, bar);
+  return row;
 }
 
 function createSourceFilterEmpty(message) {
@@ -595,6 +742,8 @@ function renderSourceFilterGroup(sourceOptions) {
     elements.sourceFilterSummary.replaceChildren(summaryFragment);
     elements.sourceFilterSummary.classList.remove("hidden");
   }
+
+  renderSourceWeights(selectedSources);
 
   const sourceFragment = document.createDocumentFragment();
   if (sourceOptions.length === 0) {
@@ -874,8 +1023,207 @@ function renderPoolQuestionModal() {
   `;
 }
 
+// Fixed status order so each row's stacked bar reads worst-to-best
+// consistently. Tones mirror the pool table status badges.
+const POOL_STATUS_ORDER = [
+  { label: "Eligible", tone: "eligible" },
+  { label: "Forced In", tone: "include" },
+  { label: "Filtered Out", tone: "filtered" },
+  { label: "Excluded (Prev Exam)", tone: "exclude" },
+  { label: "Excluded", tone: "exclude" },
+];
+
+// Legend collapses the two "exclude"-tone statuses into one swatch.
+const POOL_STATUS_LEGEND = [
+  { label: "Eligible", tone: "eligible" },
+  { label: "Forced In", tone: "include" },
+  { label: "Filtered Out", tone: "filtered" },
+  { label: "Excluded", tone: "exclude" },
+];
+
+// For each group key, tally questions per current status so every row shows
+// its live status composition rather than a single opaque total.
+function tallyStatusBy(questions, keyFor) {
+  const counts = new Map();
+  for (const question of questions) {
+    const status = rowStatus(question).label;
+    for (const key of keyFor(question)) {
+      let byStatus = counts.get(key);
+      if (!byStatus) {
+        byStatus = new Map();
+        counts.set(key, byStatus);
+      }
+      byStatus.set(status, (byStatus.get(status) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+// Empty filter = every tone visible; otherwise only the toggled-on tones.
+function toneVisible(tone) {
+  return state.breakdownStatusFilter.size === 0 || state.breakdownStatusFilter.has(tone);
+}
+
+function statusSegments(byStatus) {
+  return POOL_STATUS_ORDER
+    .filter((entry) => byStatus.get(entry.label) && toneVisible(entry.tone))
+    .map((entry) => ({ label: entry.label, tone: entry.tone, count: byStatus.get(entry.label) }));
+}
+
+function toggleBreakdownStatus(tone) {
+  const filter = state.breakdownStatusFilter;
+  if (filter.has(tone)) {
+    filter.delete(tone);
+  } else {
+    filter.add(tone);
+  }
+  renderPoolBreakdown();
+}
+
+function createBreakdownRow(label, segments, maxTotal) {
+  const total = segments.reduce((sum, segment) => sum + segment.count, 0);
+  const row = document.createElement("div");
+  row.className = "pool-breakdown__row";
+
+  const name = document.createElement("span");
+  name.className = "pool-breakdown__label";
+  name.textContent = label;
+  name.title = `${label} — ${segments.map((segment) => `${segment.label}: ${segment.count}`).join(" · ")}`;
+
+  const bar = document.createElement("span");
+  bar.className = "pool-breakdown__bar";
+  for (const segment of segments) {
+    const fill = document.createElement("span");
+    fill.className = `pool-breakdown__seg is-${segment.tone}`;
+    fill.style.width = `${maxTotal > 0 ? (segment.count / maxTotal) * 100 : 0}%`;
+    fill.title = `${segment.label}: ${segment.count}`;
+    bar.append(fill);
+  }
+
+  const value = document.createElement("span");
+  value.className = "pool-breakdown__count";
+  value.textContent = String(total);
+
+  row.append(name, bar, value);
+  return row;
+}
+
+function createBreakdownCard(title, rows) {
+  const card = document.createElement("div");
+  card.className = "pool-breakdown__card";
+
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+  card.append(heading);
+
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "pool-breakdown__empty";
+    empty.textContent = "None";
+    card.append(empty);
+    return card;
+  }
+
+  const rowsWrap = document.createElement("div");
+  rowsWrap.className = "pool-breakdown__rows";
+  // Bars share one scale (the largest group total) so lengths compare across rows.
+  const maxTotal = Math.max(...rows.map((row) => row.total));
+  for (const row of rows) {
+    rowsWrap.append(createBreakdownRow(row.label, row.segments, maxTotal));
+  }
+  card.append(rowsWrap);
+  return card;
+}
+
+function createBreakdownLegend() {
+  const legend = document.createElement("div");
+  legend.className = "pool-breakdown__legend";
+  const filter = state.breakdownStatusFilter;
+  for (const entry of POOL_STATUS_LEGEND) {
+    const selected = filter.has(entry.tone);
+    // When nothing is toggled, every item reads as active (all shown).
+    const active = filter.size === 0 || selected;
+
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `pool-breakdown__legend-item${active ? "" : " is-muted"}`;
+    item.setAttribute("aria-pressed", String(selected));
+    item.title = selected
+      ? `Stop filtering by ${entry.label}`
+      : `Show only ${entry.label}`;
+    item.addEventListener("click", () => toggleBreakdownStatus(entry.tone));
+
+    const swatch = document.createElement("span");
+    swatch.className = `pool-breakdown__swatch is-${entry.tone}`;
+    const text = document.createElement("span");
+    text.textContent = entry.label;
+    item.append(swatch, text);
+    legend.append(item);
+  }
+  return legend;
+}
+
+function renderPoolBreakdown() {
+  const questions = state.quiz.questions;
+  elements.poolBreakdownTotal.textContent = pluralize(questions.length, "question");
+
+  const sortByTotalThenLabel = (left, right) =>
+    right.total - left.total || left.label.localeCompare(right.label);
+
+  const toRows = (counts, labelFor) =>
+    [...counts.entries()]
+      .map(([key, byStatus]) => {
+        const segments = statusSegments(byStatus);
+        return {
+          label: labelFor(key),
+          total: segments.reduce((sum, segment) => sum + segment.count, 0),
+          segments,
+          sort: key,
+        };
+      })
+      // Hide rows with nothing in the currently shown statuses.
+      .filter((row) => row.total > 0);
+
+  const sourceRows = toRows(tallyStatusBy(questions, questionSources), (key) => key)
+    .sort(sortByTotalThenLabel);
+
+  const difficultyRows = toRows(
+    tallyStatusBy(questions, (question) =>
+      Number.isInteger(question.difficulty) ? [question.difficulty] : [],
+    ),
+    (key) => `Difficulty ${key}`,
+  ).sort((left, right) => left.sort - right.sort);
+
+  const objectiveRows = toRows(
+    tallyStatusBy(questions, (question) =>
+      Array.isArray(question.learningObjectiveIds) ? question.learningObjectiveIds : [],
+    ),
+    (key) => `${key} · ${objectiveLabel(key)}`,
+  ).sort(sortByTotalThenLabel);
+
+  // By Status: overall split — one row per status, single-tone bar.
+  const statusTotals = tallyStatusBy(questions, () => ["__all__"]).get("__all__") ?? new Map();
+  const statusRows = POOL_STATUS_ORDER
+    .filter((entry) => statusTotals.get(entry.label) && toneVisible(entry.tone))
+    .map((entry) => ({
+      label: entry.label,
+      total: statusTotals.get(entry.label),
+      segments: [{ label: entry.label, tone: entry.tone, count: statusTotals.get(entry.label) }],
+    }));
+
+  const grid = document.createElement("div");
+  grid.className = "pool-breakdown__grid";
+  grid.append(createBreakdownCard("By Source", sourceRows));
+  grid.append(createBreakdownCard("By Difficulty", difficultyRows));
+  grid.append(createBreakdownCard("By Objective", objectiveRows));
+  grid.append(createBreakdownCard("By Status", statusRows));
+
+  elements.poolBreakdownBody.replaceChildren(createBreakdownLegend(), grid);
+}
+
 function renderPoolState() {
   renderFilterGroups();
+  renderPoolBreakdown();
   renderPoolTable();
   updateSummary();
 }
@@ -1531,6 +1879,7 @@ function applyRestoredSelection(examSetId, selection, applyOptions) {
   state.selection.sources = Array.isArray(selection.sources)
     ? dedupe(selection.sources.filter((source) => sourceSet.has(source)))
     : [];
+  restoreSourceWeights(selection.sourceWeights);
   state.selection.difficulties = Array.isArray(selection.difficulties)
     ? dedupe(selection.difficulties.filter((difficulty) => difficultySet.has(difficulty))).sort((left, right) => left - right)
     : [];
@@ -1720,6 +2069,7 @@ function currentDraft() {
       variantCount: state.selection.variantCount,
       generationSeed: state.selection.generationSeed,
       sources: [...state.selection.sources],
+      sourceWeights: selectedSourceWeights(),
       difficulties: [...state.selection.difficulties],
       learningObjectiveIds: [...state.selection.learningObjectiveIds],
       overrides: { ...state.selection.overrides },
@@ -1785,6 +2135,7 @@ function applyGeneratorDraft(draft) {
   state.selection.sources = Array.isArray(selection.sources)
     ? dedupe(selection.sources.filter((source) => sourceSet.has(source)))
     : [];
+  restoreSourceWeights(selection.sourceWeights);
   state.selection.difficulties = Array.isArray(selection.difficulties)
     ? dedupe(selection.difficulties.filter((difficulty) => difficultySet.has(difficulty))).sort((left, right) => left - right)
     : [];
@@ -1889,6 +2240,7 @@ async function generateExams() {
     variantCount: Number.parseInt(elements.variantCount.value, 10),
     generationSeed: elements.generationSeed.value.trim(),
     sources: [...state.selection.sources],
+    sourceWeights: selectedSourceWeights(),
     difficulties: [...state.selection.difficulties],
     learningObjectiveIds: [...state.selection.learningObjectiveIds],
     includeQuestionIds: manualIncludes,
@@ -1981,6 +2333,7 @@ function wireEvents() {
 
   elements.clearSourceFilters.addEventListener("click", () => {
     state.selection.sources = [];
+    state.selection.sourceWeights = {};
     renderPoolState();
     scheduleDraftSave();
   });
@@ -2008,6 +2361,10 @@ function wireEvents() {
 
   elements.generateExams.addEventListener("click", async () => {
     await generateExams();
+  });
+
+  elements.resultClose.addEventListener("click", () => {
+    elements.results.classList.add("hidden");
   });
 
   elements.resetOverrides.addEventListener("click", () => {

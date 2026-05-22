@@ -1706,6 +1706,32 @@ def normalize_string_list(
     return dedupe_preserve_order(items)
 
 
+def normalize_weight_map(
+    payload: dict[str, Any], key: str, errors: list[dict[str, str]]
+) -> dict[str, float]:
+    value = payload.get(key, {})
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        errors.append({"path": key, "message": f"{key} must be an object mapping source to weight"})
+        return {}
+
+    weights: dict[str, float] = {}
+    for raw_label, raw_weight in value.items():
+        if not isinstance(raw_label, str) or not raw_label.strip():
+            errors.append({"path": key, "message": "Source label must be a non-empty string"})
+            continue
+        if isinstance(raw_weight, bool) or not isinstance(raw_weight, (int, float)):
+            errors.append({"path": f"{key}.{raw_label}", "message": "Weight must be a positive number"})
+            continue
+        if not math.isfinite(raw_weight) or raw_weight <= 0:
+            errors.append({"path": f"{key}.{raw_label}", "message": "Weight must be a positive number"})
+            continue
+        weights[raw_label.strip()] = float(raw_weight)
+
+    return weights
+
+
 def normalize_difficulty_list(
     payload: dict[str, Any], key: str, errors: list[dict[str, str]]
 ) -> list[int]:
@@ -1984,6 +2010,11 @@ def normalize_generation_request(
         "sources",
         errors,
     ) if "sources" in payload else normalize_string_list(payload, "chapters", errors)
+    source_weights = (
+        normalize_weight_map(payload, "sourceWeights", errors)
+        if "sourceWeights" in payload
+        else normalize_weight_map(payload, "chapterWeights", errors)
+    )
     difficulties = normalize_difficulty_list(payload, "difficulties", errors)
     learning_objective_ids = normalize_string_list(payload, "learningObjectiveIds", errors)
     include_question_ids = normalize_string_list(payload, "includeQuestionIds", errors)
@@ -2048,6 +2079,8 @@ def normalize_generation_request(
             "variantCount": variant_count,
             "sources": sources,
             "chapters": sources,
+            "sourceWeights": source_weights,
+            "chapterWeights": source_weights,
             "difficulties": difficulties,
             "learningObjectiveIds": learning_objective_ids,
             "includeQuestionIds": include_question_ids,
@@ -3460,6 +3493,63 @@ def annotate_variant_print_layouts(variants: list[dict[str, Any]]) -> None:
         variant["printLayout"] = build_variant_print_layout(variant)
 
 
+def question_selection_weight(
+    question: dict[str, Any],
+    selected_sources: set[str],
+    source_weights: dict[str, float],
+) -> float:
+    """Weight of a candidate question for probabilistic selection.
+
+    A question's weight is the largest weight among the selected sources it
+    belongs to (default 1). Using max — not sum — keeps multi-source questions
+    at weight 1 when every weight is the default, preserving uniform sampling.
+    """
+    matching = selected_sources.intersection(extract_question_source_labels(question))
+    if not matching:
+        return 1.0
+    return max(source_weights.get(label, 1.0) for label in matching)
+
+
+def weighted_sample_without_replacement(
+    items: list[Any],
+    weights: list[float],
+    count: int,
+    rng: random.Random,
+) -> list[Any]:
+    """Weighted random sampling without replacement (Efraimidis-Spirakis).
+
+    Each item gets key u**(1/w); the highest keys win, so larger weights are
+    proportionally more likely to be drawn. Deterministic for a seeded rng
+    because rng.random() is consumed once per item in input order.
+    """
+    keyed: list[tuple[float, int]] = []
+    for index, weight in enumerate(weights):
+        key = rng.random() ** (1.0 / weight)
+        keyed.append((key, index))
+    keyed.sort(key=lambda pair: pair[0], reverse=True)
+    return [items[index] for _, index in keyed[:count]]
+
+
+def sample_questions_for_selection(
+    candidates: list[dict[str, Any]],
+    count: int,
+    selected_sources: set[str],
+    source_weights: dict[str, float],
+    rng: random.Random,
+) -> list[dict[str, Any]]:
+    if count <= 0:
+        return []
+    weights = [
+        question_selection_weight(question, selected_sources, source_weights)
+        for question in candidates
+    ]
+    # No weights, or every candidate weighs the same: fall back to uniform
+    # sampling so behavior (and seeded reproducibility) is unchanged.
+    if not source_weights or len(set(weights)) <= 1:
+        return rng.sample(candidates, count)
+    return weighted_sample_without_replacement(candidates, weights, count, rng)
+
+
 def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     question_by_id, order_by_id, question_errors = build_question_index(quiz)
     if question_errors:
@@ -3504,7 +3594,13 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
     generation_seed = request["generationSeed"] or random_generation_seed()
     rng = random.Random()
     rng.seed(generation_seed, version=2)
-    sampled_questions = rng.sample(remaining_candidates, remaining_slots)
+    sampled_questions = sample_questions_for_selection(
+        remaining_candidates,
+        remaining_slots,
+        set(request.get("sources") or []),
+        request.get("sourceWeights") or {},
+        rng,
+    )
     selected_question_ids = {question["id"] for question in forced_questions + sampled_questions}
     selected_questions = [
         question for question in ordered_questions if question["id"] in selected_question_ids
@@ -3565,6 +3661,8 @@ def generate_exam_run(state: AppState, quiz: dict[str, Any], request: dict[str, 
             "variantCount": request["variantCount"],
             "sources": request["sources"],
             "chapters": request["sources"],
+            "sourceWeights": request["sourceWeights"],
+            "chapterWeights": request["sourceWeights"],
             "difficulties": request["difficulties"],
             "learningObjectiveIds": request["learningObjectiveIds"],
             "includeQuestionIds": request["includeQuestionIds"],

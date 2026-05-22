@@ -280,6 +280,7 @@
                 </div>
               </div>
               <div id="source-filter-summary" class="source-filter__summary"></div>
+              <div id="source-weights" class="source-weights hidden"></div>
               <div id="source-filters" class="source-filter-list"></div>
             </section>
 
@@ -310,6 +311,44 @@
         </aside>
 
         <main class="generator-main">
+          <div id="generation-results" class="results-stack hidden">
+            <section class="panel generation-success no-print">
+              <div class="panel__head">
+                <div>
+                  <p class="eyebrow">Generation Complete</p>
+                  <h2 id="result-heading">Exam Set Saved</h2>
+                </div>
+                <div class="panel__actions">
+                  <a id="result-viewer-link" class="button button--primary" href="/viewer.html">Open In Exam Viewer</a>
+                  <button id="result-close" class="button button--ghost" type="button" aria-label="Dismiss generation result">Close</button>
+                </div>
+              </div>
+              <p id="result-message" class="generation-success__message"></p>
+              <div class="result-summary result-summary--compact">
+                <div class="metric">
+                  <span class="metric__label">Exam Set ID</span>
+                  <span id="result-exam-set-id" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Generated At</span>
+                  <span id="result-generated-at" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Seed</span>
+                  <span id="result-generation-seed" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Selected Questions</span>
+                  <span id="result-selected-count" class="metric__value"></span>
+                </div>
+                <div class="metric">
+                  <span class="metric__label">Variants</span>
+                  <span id="result-variant-count" class="metric__value"></span>
+                </div>
+              </div>
+            </section>
+          </div>
+
           <section id="generator-errors" class="panel panel--error hidden no-print">
             <div class="panel__subhead">
               <h3>Generation Errors</h3>
@@ -328,6 +367,13 @@
             <p class="helper-copy">
               Use row overrides to force-include or force-exclude questions regardless of the current filters.
             </p>
+            <details id="pool-breakdown" class="pool-breakdown" open>
+              <summary class="pool-breakdown__summary">
+                <span>Pool Breakdown</span>
+                <span id="pool-breakdown-total" class="pool-breakdown__total"></span>
+              </summary>
+              <div id="pool-breakdown-body" class="pool-breakdown__body"></div>
+            </details>
             <label class="field field--full no-print">
               <span>Search Pool</span>
               <input
@@ -361,43 +407,6 @@
               </table>
             </div>
           </section>
-
-          <div id="generation-results" class="results-stack hidden">
-            <section class="panel generation-success no-print">
-              <div class="panel__head">
-                <div>
-                  <p class="eyebrow">Generation Complete</p>
-                  <h2 id="result-heading">Exam Set Saved</h2>
-                </div>
-                <div class="panel__actions">
-                  <a id="result-viewer-link" class="button button--primary" href="/viewer.html">Open In Exam Viewer</a>
-                </div>
-              </div>
-              <p id="result-message" class="generation-success__message"></p>
-              <div class="result-summary result-summary--compact">
-                <div class="metric">
-                  <span class="metric__label">Exam Set ID</span>
-                  <span id="result-exam-set-id" class="metric__value"></span>
-                </div>
-                <div class="metric">
-                  <span class="metric__label">Generated At</span>
-                  <span id="result-generated-at" class="metric__value"></span>
-                </div>
-                <div class="metric">
-                  <span class="metric__label">Seed</span>
-                  <span id="result-generation-seed" class="metric__value"></span>
-                </div>
-                <div class="metric">
-                  <span class="metric__label">Selected Questions</span>
-                  <span id="result-selected-count" class="metric__value"></span>
-                </div>
-                <div class="metric">
-                  <span class="metric__label">Variants</span>
-                  <span id="result-variant-count" class="metric__value"></span>
-                </div>
-              </div>
-            </section>
-          </div>
         </main>
       </div>
     </div>
