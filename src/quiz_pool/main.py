@@ -12,13 +12,16 @@ import io
 import json
 import math
 import mimetypes
+import os
 import random
 import re
+import secrets
 import shutil
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -1069,6 +1072,148 @@ def set_active_project(
     state.project_path = project_path
     state.db_path = project_path
     state.exam_store_path = project_path
+    try:
+        create_project_snapshot_if_changed(project_path, "baseline")
+    except OSError:
+        pass
+
+
+# ---- Project DB snapshots ----
+# A snapshot is a byte copy of the whole .quizpool file kept in a sidecar
+# directory next to it (e.g. course.quizpool.snapshots/). Names encode the
+# creation kind so the UI can label and prune them; the snapshot file's mtime
+# is the creation time. Restore copies a snapshot back over the live DB after
+# first capturing a "prerestore" snapshot so the action is reversible.
+
+SNAPSHOT_EXT = ".quizpool"
+SNAPSHOT_AUTO_KEEP = 10
+SNAPSHOT_PRERESTORE_KEEP = 5
+SNAPSHOT_INTERVAL_SECONDS = 15 * 60
+_snapshot_lock = threading.RLock()  # reentrant: restore re-enters via snapshot create
+
+
+def snapshot_dir_for(project_path: Path) -> Path:
+    return project_path.with_name(project_path.name + ".snapshots")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _snapshot_entry(path: Path) -> dict[str, Any]:
+    parts = path.name[: -len(SNAPSHOT_EXT)].split("_")
+    kind = parts[-1] if parts else "unknown"
+    stat = path.stat()
+    created = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+    return {
+        "id": path.name,
+        "kind": kind,
+        "createdAt": created,
+        "sizeBytes": stat.st_size,
+    }
+
+
+def list_project_snapshots(project_path: Path) -> list[dict[str, Any]]:
+    directory = snapshot_dir_for(project_path)
+    if not directory.is_dir():
+        return []
+    entries = [
+        _snapshot_entry(path)
+        for path in directory.glob("*" + SNAPSHOT_EXT)
+        if path.is_file()
+    ]
+    entries.sort(key=lambda entry: entry["createdAt"], reverse=True)
+    return entries
+
+
+def create_project_snapshot(project_path: Path, kind: str) -> dict[str, Any] | None:
+    if not project_path.is_file():
+        return None
+    directory = snapshot_dir_for(project_path)
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    name = f"{stamp}_{secrets.token_hex(3)}_{kind}{SNAPSHOT_EXT}"
+    dest = directory / name
+    with _snapshot_lock:
+        shutil.copy2(project_path, dest)
+        os.utime(dest, None)
+    return _snapshot_entry(dest)
+
+
+def create_project_snapshot_if_changed(
+    project_path: Path, kind: str
+) -> dict[str, Any] | None:
+    """Snapshot only when the live DB differs from the most recent snapshot."""
+    if not project_path.is_file():
+        return None
+    existing = list_project_snapshots(project_path)
+    if existing:
+        newest = snapshot_dir_for(project_path) / existing[0]["id"]
+        if newest.is_file() and _file_sha256(newest) == _file_sha256(project_path):
+            return None
+    return create_project_snapshot(project_path, kind)
+
+
+def prune_project_snapshots(project_path: Path, kind: str, keep: int) -> None:
+    matching = [
+        entry for entry in list_project_snapshots(project_path)
+        if entry["kind"] == kind
+    ]
+    directory = snapshot_dir_for(project_path)
+    for entry in matching[keep:]:
+        (directory / entry["id"]).unlink(missing_ok=True)
+
+
+def _resolve_snapshot_path(project_path: Path, snapshot_id: str) -> Path:
+    if "/" in snapshot_id or "\\" in snapshot_id or ".." in snapshot_id:
+        raise ValueError("Invalid snapshot id")
+    valid = {entry["id"] for entry in list_project_snapshots(project_path)}
+    if snapshot_id not in valid:
+        raise ValueError("Unknown snapshot")
+    return snapshot_dir_for(project_path) / snapshot_id
+
+
+def restore_project_snapshot(project_path: Path, snapshot_id: str) -> None:
+    source = _resolve_snapshot_path(project_path, snapshot_id)
+    with _snapshot_lock:
+        safety = create_project_snapshot(project_path, "prerestore")
+        shutil.copy2(source, project_path)
+    try:
+        load_project_quiz(project_path)
+    except (ValueError, sqlite3.DatabaseError) as error:
+        if safety is not None:
+            with _snapshot_lock:
+                shutil.copy2(snapshot_dir_for(project_path) / safety["id"], project_path)
+        raise ValueError(f"Snapshot could not be restored: {error}") from error
+    prune_project_snapshots(project_path, "prerestore", SNAPSHOT_PRERESTORE_KEEP)
+
+
+def delete_project_snapshot(project_path: Path, snapshot_id: str) -> None:
+    target = _resolve_snapshot_path(project_path, snapshot_id)
+    target.unlink(missing_ok=True)
+
+
+def start_snapshot_timer(
+    state: AppState, stop_event: threading.Event
+) -> threading.Thread:
+    def loop() -> None:
+        while not stop_event.wait(SNAPSHOT_INTERVAL_SECONDS):
+            project_path = state.project_path
+            if project_path is None:
+                continue
+            try:
+                if create_project_snapshot_if_changed(project_path, "auto"):
+                    prune_project_snapshots(project_path, "auto", SNAPSHOT_AUTO_KEEP)
+            except OSError:
+                continue
+
+    thread = threading.Thread(target=loop, name="snapshot-timer", daemon=True)
+    thread.start()
+    return thread
 
 
 def dedupe_preserve_order(items: list[Any]) -> list[Any]:
@@ -5032,6 +5177,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/gradings":
                 self.handle_list_grading_runs()
                 return
+            if parsed.path == "/api/snapshots":
+                self.handle_list_snapshots()
+                return
             if parsed.path.startswith("/api/assets/"):
                 self.handle_get_asset(parsed.path)
                 return
@@ -5092,6 +5240,12 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/quiz/import-json":
                 self.handle_import_quiz_json()
                 return
+            if parsed.path == "/api/snapshots/restore":
+                self.handle_restore_snapshot()
+                return
+            if parsed.path == "/api/snapshots":
+                self.handle_create_snapshot()
+                return
             if parsed.path == "/api/quiz":
                 self.handle_put_quiz()
                 return
@@ -5124,6 +5278,9 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path.startswith("/api/exams/set/"):
                 self.handle_delete_exam_set(parsed.path)
+                return
+            if parsed.path.startswith("/api/snapshots/"):
+                self.handle_delete_snapshot(parsed.path)
                 return
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
 
@@ -5220,6 +5377,71 @@ def build_handler(state: AppState) -> type[BaseHTTPRequestHandler]:
 
         def handle_get_project(self) -> None:
             self.send_json(self.session_payload())
+
+        def handle_list_snapshots(self) -> None:
+            project_path = active_project_path(state)
+            self.send_json(
+                {"ok": True, "snapshots": list_project_snapshots(project_path)}
+            )
+
+        def handle_create_snapshot(self) -> None:
+            project_path = active_project_path(state)
+            try:
+                snapshot = create_project_snapshot(project_path, "manual")
+            except OSError as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<snapshot>", "message": str(error)}]},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+            self.send_json(
+                {
+                    "ok": True,
+                    "snapshot": snapshot,
+                    "snapshots": list_project_snapshots(project_path),
+                }
+            )
+
+        def handle_restore_snapshot(self) -> None:
+            payload, errors = self.read_json_body()
+            if errors:
+                self.send_json({"ok": False, "errors": errors}, status=HTTPStatus.BAD_REQUEST)
+                return
+            snapshot_id = payload.get("id")
+            if not isinstance(snapshot_id, str) or not snapshot_id.strip():
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "id", "message": "Snapshot id is required"}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            project_path = active_project_path(state)
+            try:
+                restore_project_snapshot(project_path, snapshot_id)
+            except (ValueError, OSError) as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<snapshot>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            clear_grading_uploads(state)
+            self.send_json(
+                {**self.session_payload(), "snapshots": list_project_snapshots(project_path)}
+            )
+
+        def handle_delete_snapshot(self, path: str) -> None:
+            snapshot_id = unquote(path.removeprefix("/api/snapshots/")).strip()
+            project_path = active_project_path(state)
+            try:
+                delete_project_snapshot(project_path, snapshot_id)
+            except (ValueError, OSError) as error:
+                self.send_json(
+                    {"ok": False, "errors": [{"path": "<snapshot>", "message": str(error)}]},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self.send_json(
+                {"ok": True, "snapshots": list_project_snapshots(project_path)}
+            )
 
         def handle_system_file_dialog(self) -> None:
             payload, body_errors = self.read_json_body()
@@ -6168,6 +6390,13 @@ def main() -> None:
         project_path=project_path,
         validator=validator,
     )
+    if project_path is not None:
+        try:
+            create_project_snapshot_if_changed(project_path, "baseline")
+        except OSError:
+            pass
+    snapshot_stop = threading.Event()
+    start_snapshot_timer(app_state, snapshot_stop)
     handler = build_handler(app_state)
     server = ThreadingHTTPServer((args.host, args.port), handler)
 
@@ -6181,6 +6410,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        snapshot_stop.set()
         clear_grading_uploads(app_state)
         server.server_close()
 

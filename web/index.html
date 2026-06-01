@@ -25,6 +25,63 @@
         </div>
       </section>
     </div>
+    <div id="import-mode-modal" class="detail-modal" aria-hidden="true">
+      <div id="import-mode-backdrop" class="detail-modal__backdrop"></div>
+      <section class="detail-modal__panel" role="dialog" aria-modal="true" aria-labelledby="import-mode-title">
+        <div class="panel__head">
+          <div>
+            <p class="eyebrow">Import Quiz JSON</p>
+            <h2 id="import-mode-title">Overwrite Or Append?</h2>
+          </div>
+        </div>
+        <p class="question-detail-sheet__copy">
+          Overwrite replaces the entire quiz pool with the imported file.
+          Append adds the imported learning objectives and questions to the
+          current pool and rejects duplicate question ids.
+        </p>
+        <div class="panel__actions">
+          <button id="cancel-import-mode" class="button button--ghost" type="button">Cancel</button>
+          <button id="append-import-mode" class="button" type="button">Append</button>
+          <button id="overwrite-import-mode" class="button button--danger" type="button">Overwrite</button>
+        </div>
+      </section>
+    </div>
+    <div id="append-diff-modal" class="detail-modal" aria-hidden="true">
+      <div id="append-diff-backdrop" class="detail-modal__backdrop"></div>
+      <section class="detail-modal__panel" role="dialog" aria-modal="true" aria-labelledby="append-diff-title">
+        <div class="panel__head">
+          <div>
+            <p class="eyebrow">Append Quiz JSON</p>
+            <h2 id="append-diff-title">Resolve Conflicting Questions</h2>
+          </div>
+        </div>
+        <p id="append-diff-summary" class="question-detail-sheet__copy"></p>
+        <div class="panel__subhead">
+          <div></div>
+          <div class="panel__actions">
+            <button id="append-diff-keep-all" class="button button--ghost" type="button">Keep all current</button>
+            <button id="append-diff-update-all" class="button button--ghost" type="button">Update all from import</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="pool-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Changed fields</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="append-diff-conflicts-body"></tbody>
+          </table>
+        </div>
+        <p id="append-diff-lo-note" class="helper-copy" hidden></p>
+        <div class="panel__actions">
+          <button id="append-diff-cancel" class="button button--ghost" type="button">Cancel</button>
+          <button id="append-diff-apply" class="button" type="button">Apply Append</button>
+        </div>
+      </section>
+    </div>
     <div class="page-shell">
       <header class="panel masthead">
         <div class="masthead__copy">
@@ -329,5 +386,6 @@
     </template>
 
     <script type="module" src="/app.js"></script>
+    <script type="module" src="/snapshots.js"></script>
   </body>
 </html>

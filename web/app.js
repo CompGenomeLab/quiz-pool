@@ -38,6 +38,20 @@ const elements = {
   learningObjectives: document.querySelector("#learning-objectives"),
   importQuizJson: document.querySelector("#import-quiz-json"),
   importQuizJsonFile: document.querySelector("#import-quiz-json-file"),
+  importModeModal: document.querySelector("#import-mode-modal"),
+  importModeBackdrop: document.querySelector("#import-mode-backdrop"),
+  cancelImportMode: document.querySelector("#cancel-import-mode"),
+  appendImportMode: document.querySelector("#append-import-mode"),
+  overwriteImportMode: document.querySelector("#overwrite-import-mode"),
+  appendDiffModal: document.querySelector("#append-diff-modal"),
+  appendDiffBackdrop: document.querySelector("#append-diff-backdrop"),
+  appendDiffSummary: document.querySelector("#append-diff-summary"),
+  appendDiffConflictsBody: document.querySelector("#append-diff-conflicts-body"),
+  appendDiffLoNote: document.querySelector("#append-diff-lo-note"),
+  appendDiffKeepAll: document.querySelector("#append-diff-keep-all"),
+  appendDiffUpdateAll: document.querySelector("#append-diff-update-all"),
+  appendDiffApply: document.querySelector("#append-diff-apply"),
+  appendDiffCancel: document.querySelector("#append-diff-cancel"),
   metaPanelBody: document.querySelector("#meta-panel-body"),
   questionDifficulty: document.querySelector("#question-difficulty"),
   questionEditor: document.querySelector("#question-editor"),
@@ -722,18 +736,57 @@ async function saveQuiz() {
   setStatus(`Saved at ${new Date().toLocaleTimeString()}.`);
 }
 
-async function importQuizJson(file) {
-  setStatus("Importing quiz JSON...");
-  const content = await file.text();
+let pendingImportFile = null;
+
+function openImportModeModal(file) {
+  pendingImportFile = file;
+  elements.importModeModal.classList.add("is-open");
+  elements.importModeModal.setAttribute("aria-hidden", "false");
+}
+
+function closeImportModeModal() {
+  pendingImportFile = null;
+  elements.importModeModal.classList.remove("is-open");
+  elements.importModeModal.setAttribute("aria-hidden", "true");
+}
+
+async function runImport(mode) {
+  const file = pendingImportFile;
+  closeImportModeModal();
+  if (!file) {
+    return;
+  }
+  try {
+    if (mode === "append") {
+      await appendQuizJson(file);
+    } else {
+      const currentCount = state.quiz?.questions?.length ?? 0;
+      if (!window.confirm(
+        `Overwrite the entire quiz pool with "${file.name}"?\n\n`
+        + `This replaces all ${currentCount} current question(s) and the learning objectives. `
+        + "This cannot be undone from here (a project DB snapshot is kept on the Snapshots panel).",
+      )) {
+        setStatus("Import canceled.");
+        return;
+      }
+      const content = await file.text();
+      await writeQuizDocument(content, file.name, "Importing quiz JSON...", "Quiz JSON imported into the project DB.");
+    }
+  } catch (error) {
+    state.validationErrors = [{ path: "<import>", message: error.message }];
+    renderErrors();
+    setStatus(error.message, true);
+  }
+}
+
+// POST a full quiz document to the import endpoint (overwrite semantics) and
+// refresh editor state from the response.
+async function writeQuizDocument(content, filename, busyStatus, doneStatus) {
+  setStatus(busyStatus);
   const response = await fetch("/api/quiz/import-json", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      filename: file.name,
-      content,
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, content }),
   });
   const payload = await response.json();
   if (!response.ok) {
@@ -749,7 +802,194 @@ async function importQuizJson(file) {
   state.selectedQuestionIndex = 0;
   state.validationErrors = [];
   render();
-  setStatus("Quiz JSON imported into the project DB.");
+  setStatus(doneStatus);
+}
+
+// ---- Append-mode merge (mirrors the generator's restore diff) ----
+
+const APPEND_DIFF_FIELDS = [
+  "question",
+  "choices",
+  "correctAnswers",
+  "explanation",
+  "difficulty",
+  "points",
+  "shuffleChoices",
+  "learningObjectiveIds",
+  "imageAssetIds",
+  "locations",
+];
+
+function normalizeQuestionForDiff(question) {
+  if (!question) return null;
+  return {
+    question: question.question ?? "",
+    choices: (question.choices || []).map((choice) => ({
+      key: choice?.key ?? "",
+      text: choice?.text ?? "",
+    })),
+    correctAnswers: (question.correctAnswers || []).map(String),
+    explanation: question.explanation ?? "",
+    difficulty: question.difficulty,
+    points: question.points,
+    shuffleChoices: Boolean(question.shuffleChoices),
+    learningObjectiveIds: (question.learningObjectiveIds || []).map(String),
+    imageAssetIds: (question.imageAssetIds || []).map(String),
+    locations: Array.isArray(question.locations)
+      ? question.locations
+      : Array.isArray(question.bookLocations) ? question.bookLocations : [],
+  };
+}
+
+function appendChangedFields(current, incoming) {
+  const a = normalizeQuestionForDiff(current);
+  const b = normalizeQuestionForDiff(incoming);
+  const changed = [];
+  for (const field of APPEND_DIFF_FIELDS) {
+    if (JSON.stringify(a[field] ?? null) !== JSON.stringify(b[field] ?? null)) {
+      changed.push(field);
+    }
+  }
+  return changed;
+}
+
+function computeAppendDiff(incoming) {
+  const current = state.quiz;
+  const currentById = new Map((current.questions || []).map((q) => [q.id, q]));
+  const currentLOById = new Map((current.learningObjectives || []).map((lo) => [lo.id, lo.label]));
+
+  const newQuestions = [];
+  const conflicts = [];
+  let identicalCount = 0;
+  for (const q of incoming.questions || []) {
+    const existing = currentById.get(q.id);
+    if (!existing) {
+      newQuestions.push(q);
+    } else if (appendChangedFields(existing, q).length === 0) {
+      identicalCount += 1;
+    } else {
+      conflicts.push({ id: q.id, incoming: q, changedFields: appendChangedFields(existing, q), decision: "keep" });
+    }
+  }
+  conflicts.sort((l, r) => String(l.id).localeCompare(String(r.id)));
+
+  const newLOs = [];
+  const loConflicts = [];
+  for (const lo of incoming.learningObjectives || []) {
+    if (!currentLOById.has(lo.id)) {
+      newLOs.push(lo);
+    } else if (currentLOById.get(lo.id) !== lo.label) {
+      loConflicts.push({ id: lo.id, currentLabel: currentLOById.get(lo.id), incomingLabel: lo.label });
+    }
+  }
+  return { newQuestions, conflicts, identicalCount, newLOs, loConflicts };
+}
+
+function buildMergedQuiz(diff) {
+  const current = state.quiz;
+  const updateById = new Map();
+  for (const row of diff.conflicts) {
+    if (row.decision === "update") updateById.set(row.id, row.incoming);
+  }
+  const questions = (current.questions || [])
+    .map((q) => updateById.get(q.id) ?? q)
+    .concat(diff.newQuestions);
+  const learningObjectives = (current.learningObjectives || []).concat(diff.newLOs);
+  return { ...current, learningObjectives, questions };
+}
+
+function summarizeAppend(diff) {
+  const updated = diff.conflicts.filter((row) => row.decision === "update").length;
+  const parts = [
+    `${diff.newQuestions.length} new`,
+    `${updated} updated`,
+    `${diff.identicalCount} identical skipped`,
+  ];
+  if (diff.conflicts.length - updated > 0) parts.push(`${diff.conflicts.length - updated} conflicts kept current`);
+  if (diff.newLOs.length) parts.push(`${diff.newLOs.length} new objectives`);
+  if (diff.loConflicts.length) parts.push(`${diff.loConflicts.length} objective label diffs kept current`);
+  return parts.join(", ");
+}
+
+async function commitAppend(diff) {
+  const merged = buildMergedQuiz(diff);
+  await writeQuizDocument(JSON.stringify(merged), null, "Appending quiz JSON...", `Append complete: ${summarizeAppend(diff)}.`);
+}
+
+let pendingAppendDiff = null;
+
+async function appendQuizJson(file) {
+  const content = await file.text();
+  let incoming;
+  try {
+    incoming = JSON.parse(content);
+  } catch (error) {
+    throw new Error(`Imported file is not valid JSON: ${error.message}`);
+  }
+  if (!incoming || typeof incoming !== "object" || !Array.isArray(incoming.questions)) {
+    throw new Error("Imported file is missing a questions array.");
+  }
+  const diff = computeAppendDiff(incoming);
+  if (diff.conflicts.length === 0) {
+    await commitAppend(diff);
+    return;
+  }
+  openAppendDiffModal(diff);
+}
+
+function openAppendDiffModal(diff) {
+  pendingAppendDiff = diff;
+  renderAppendDiffModal(diff);
+  elements.appendDiffModal.classList.add("is-open");
+  elements.appendDiffModal.setAttribute("aria-hidden", "false");
+}
+
+function closeAppendDiffModal() {
+  pendingAppendDiff = null;
+  elements.appendDiffModal.classList.remove("is-open");
+  elements.appendDiffModal.setAttribute("aria-hidden", "true");
+}
+
+function renderAppendDiffModal(diff) {
+  elements.appendDiffSummary.textContent =
+    `${diff.newQuestions.length} new question(s) will be added, ${diff.identicalCount} identical skipped. `
+    + `${diff.conflicts.length} question(s) share an id with the current pool but differ — choose per question.`;
+
+  const body = elements.appendDiffConflictsBody;
+  body.replaceChildren();
+  for (const row of diff.conflicts) {
+    const tr = document.createElement("tr");
+    const idCell = document.createElement("td");
+    idCell.textContent = row.id;
+    const fieldsCell = document.createElement("td");
+    fieldsCell.textContent = row.changedFields.join(", ");
+    const actionCell = document.createElement("td");
+    const select = document.createElement("select");
+    select.className = "input";
+    for (const [value, label] of [["keep", "Keep current"], ["update", "Update from import"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      if (value === row.decision) option.selected = true;
+      select.append(option);
+    }
+    select.addEventListener("change", (event) => {
+      row.decision = event.target.value;
+    });
+    actionCell.append(select);
+    tr.append(idCell, fieldsCell, actionCell);
+    body.append(tr);
+  }
+
+  if (diff.loConflicts.length) {
+    elements.appendDiffLoNote.hidden = false;
+    elements.appendDiffLoNote.textContent =
+      `Note: ${diff.loConflicts.length} learning objective id(s) exist with a different label `
+      + `(${diff.loConflicts.map((c) => c.id).join(", ")}); the current label is kept.`;
+  } else {
+    elements.appendDiffLoNote.hidden = true;
+    elements.appendDiffLoNote.textContent = "";
+  }
 }
 
 function readFileAsBase64(file) {
@@ -896,8 +1136,44 @@ function wireGlobalFields() {
       setStatus("Import canceled.");
       return;
     }
+    openImportModeModal(file);
+  });
+
+  elements.cancelImportMode.addEventListener("click", () => {
+    closeImportModeModal();
+    setStatus("Import canceled.");
+  });
+  elements.importModeBackdrop.addEventListener("click", () => {
+    closeImportModeModal();
+    setStatus("Import canceled.");
+  });
+  elements.appendImportMode.addEventListener("click", () => runImport("append"));
+  elements.overwriteImportMode.addEventListener("click", () => runImport("overwrite"));
+
+  elements.appendDiffCancel.addEventListener("click", () => {
+    closeAppendDiffModal();
+    setStatus("Append canceled.");
+  });
+  elements.appendDiffBackdrop.addEventListener("click", () => {
+    closeAppendDiffModal();
+    setStatus("Append canceled.");
+  });
+  elements.appendDiffKeepAll.addEventListener("click", () => {
+    if (!pendingAppendDiff) return;
+    for (const row of pendingAppendDiff.conflicts) row.decision = "keep";
+    renderAppendDiffModal(pendingAppendDiff);
+  });
+  elements.appendDiffUpdateAll.addEventListener("click", () => {
+    if (!pendingAppendDiff) return;
+    for (const row of pendingAppendDiff.conflicts) row.decision = "update";
+    renderAppendDiffModal(pendingAppendDiff);
+  });
+  elements.appendDiffApply.addEventListener("click", async () => {
+    const diff = pendingAppendDiff;
+    closeAppendDiffModal();
+    if (!diff) return;
     try {
-      await importQuizJson(file);
+      await commitAppend(diff);
     } catch (error) {
       state.validationErrors = [{ path: "<import>", message: error.message }];
       renderErrors();

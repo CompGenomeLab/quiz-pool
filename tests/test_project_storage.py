@@ -20,6 +20,14 @@ from src.quiz_pool.main import (
     import_quiz_json_content_into_project,
     import_quiz_json_into_project,
     initialize_empty_project,
+    create_project_snapshot,
+    create_project_snapshot_if_changed,
+    list_project_snapshots,
+    restore_project_snapshot,
+    prune_project_snapshots,
+    delete_project_snapshot,
+    write_project_quiz,
+    load_project_quiz,
     load_active_quiz,
     load_internal_schema,
     load_project_generator_draft,
@@ -146,6 +154,57 @@ class ProjectStorageTests(unittest.TestCase):
 
             quiz = load_active_quiz(state)
             self.assertGreater(len(quiz["questions"]), 0)
+
+    def test_snapshots_capture_restore_prune_and_reject_traversal(self) -> None:
+        # Snapshots must let the user roll the whole DB back to an earlier point,
+        # take a safety copy before restoring, bound auto growth, and never let a
+        # crafted id escape the snapshot directory.
+        def quiz(title: str) -> dict:
+            return {
+                "title": title,
+                "learningObjectives": [{"id": "LO1", "label": "L"}],
+                "questions": [],
+            }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = Path(temp_dir) / "course.quizpool"
+            initialize_empty_project(project_path)
+
+            write_project_quiz(project_path, quiz("V1"))
+            baseline = create_project_snapshot_if_changed(project_path, "baseline")
+            self.assertEqual(baseline["kind"], "baseline")
+            # Unchanged DB must not produce a redundant snapshot.
+            self.assertIsNone(create_project_snapshot_if_changed(project_path, "baseline"))
+
+            write_project_quiz(project_path, quiz("V2"))
+            manual = create_project_snapshot(project_path, "manual")
+
+            # Restore the V1 baseline over the current V2 state.
+            write_project_quiz(project_path, quiz("V3"))
+            restore_project_snapshot(project_path, baseline["id"])
+            self.assertEqual(load_project_quiz(project_path)["title"], "V1")
+            # Restore captured a safety copy first.
+            kinds = {s["kind"] for s in list_project_snapshots(project_path)}
+            self.assertIn("prerestore", kinds)
+
+            # Auto snapshots prune to the keep count.
+            for index in range(13):
+                write_project_quiz(project_path, quiz(f"A{index}"))
+                create_project_snapshot(project_path, "auto")
+            prune_project_snapshots(project_path, "auto", 10)
+            autos = [s for s in list_project_snapshots(project_path) if s["kind"] == "auto"]
+            self.assertEqual(len(autos), 10)
+
+            with self.assertRaises(ValueError):
+                restore_project_snapshot(project_path, "../escape.quizpool")
+            with self.assertRaises(ValueError):
+                delete_project_snapshot(project_path, "../escape.quizpool")
+
+            delete_project_snapshot(project_path, manual["id"])
+            self.assertEqual(
+                [s for s in list_project_snapshots(project_path) if s["kind"] == "manual"],
+                [],
+            )
 
     def test_project_asset_upload_records_png_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
