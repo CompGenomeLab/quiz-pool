@@ -16,8 +16,15 @@ let mutationObserver = null;
 let flushPromise = null;
 const scheduledRoots = new Set();
 
+function applyInlineEmphasis(html) {
+  return html
+    .replace(/\*\*([^*]+?)\*\*/gu, "<strong>$1</strong>")
+    .replace(/\*([^*]+?)\*/gu, "<em>$1</em>");
+}
+
 function renderPlainTextSegment(value) {
-  return escapeHtml(String(value ?? "").replace(/\r\n?/gu, "\n")).replaceAll("\n", "<br />");
+  const escaped = escapeHtml(String(value ?? "").replace(/\r\n?/gu, "\n"));
+  return applyInlineEmphasis(escaped).replaceAll("\n", "<br />");
 }
 
 function renderMathExpression(value) {

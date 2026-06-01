@@ -1455,6 +1455,12 @@ def latex_escape_text_segment(value: Any, *, preserve_linebreaks: bool = True) -
     return escaped
 
 
+def apply_inline_emphasis_latex(escaped: str) -> str:
+    escaped = re.sub(r"\*\*([^*]+?)\*\*", r"\\textbf{\1}", escaped)
+    escaped = re.sub(r"\*([^*]+?)\*", r"\\emph{\1}", escaped)
+    return escaped
+
+
 def render_rich_text_latex(value: Any, *, preserve_linebreaks: bool = True) -> str:
     source = str(value or "")
     if not source:
@@ -1465,9 +1471,11 @@ def render_rich_text_latex(value: Any, *, preserve_linebreaks: bool = True) -> s
     for match in MATH_TAG_PATTERN.finditer(source):
         start = match.start()
         parts.append(
-            latex_escape_text_segment(
-                source[cursor:start],
-                preserve_linebreaks=preserve_linebreaks,
+            apply_inline_emphasis_latex(
+                latex_escape_text_segment(
+                    source[cursor:start],
+                    preserve_linebreaks=preserve_linebreaks,
+                )
             )
         )
         expression = (match.group(1) or "").strip()
@@ -1476,9 +1484,11 @@ def render_rich_text_latex(value: Any, *, preserve_linebreaks: bool = True) -> s
         cursor = match.end()
 
     parts.append(
-        latex_escape_text_segment(
-            source[cursor:],
-            preserve_linebreaks=preserve_linebreaks,
+        apply_inline_emphasis_latex(
+            latex_escape_text_segment(
+                source[cursor:],
+                preserve_linebreaks=preserve_linebreaks,
+            )
         )
     )
     return "".join(parts)
