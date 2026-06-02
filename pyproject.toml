@@ -28,4 +28,3 @@ packages = ["src/quiz_pool"]
 [tool.hatch.build.targets.wheel.force-include]
 "web" = "quiz_pool/web"
 "tex_templates" = "quiz_pool/tex_templates"
-"sample_quiz.json" = "quiz_pool/sample_quiz.json"
